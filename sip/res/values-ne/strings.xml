@@ -65,7 +65,7 @@
     <string name="default_preference_summary_password" msgid="4464464672997027904">"&lt;सेट गरिएको छैन&gt;"</string>
     <string name="default_preference_summary_domain_address" msgid="4871971710197441673">"&lt;सेट गरिएको छैन&gt;"</string>
     <string name="display_name_summary" msgid="7155076491675565407">"&lt;एक-पटके पाठ सन्देश जस्तै&gt;"</string>
-    <string name="optional_summary" msgid="2363105560396317624">"&lt;वैकल्पिकgt;"</string>
+    <string name="optional_summary" msgid="2363105560396317624">"&lt;वैकल्पिक&gt;"</string>
     <string name="advanced_settings_show" msgid="7838761602853998622">"▷ छोएर सबै देखाउनुहोस्"</string>
     <string name="advanced_settings_hide" msgid="3480554978705290228">"▽ छोएर सबै लुकाउनुहोस्"</string>
     <string name="all_empty_alert" msgid="4087734950375192387">"नयाँ SIP खाताको विवरणहरू प्रविष्टि गर्नुहोस्।"</string>

@@ -57,7 +57,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
-
+import android.telephony.SubscriptionManager;
 public class VoicemailSettingsActivity extends PreferenceActivity
         implements DialogInterface.OnClickListener,
                 Preference.OnPreferenceChangeListener,
@@ -202,6 +202,10 @@ public class VoicemailSettingsActivity extends PreferenceActivity
     private VoicemailProviderListPreference mVoicemailProviders;
     private PreferenceScreen mVoicemailSettings;
     private Preference mVoicemailNotificationPreference;
+    //UNISOC: add for bug1091930
+    private static final String VOICE_MAIL_CHANGE_INTENT = "android.callsettings.action.VM_SETTING_CHANGED";
+    private SubscriptionManager mSubscriptionManager;
+    private ActivityContainer mActivityContainer; //Unisoc: add for bug 1151039
 
     //*********************************************************************************************
     // Preference Activity Methods
@@ -233,19 +237,31 @@ public class VoicemailSettingsActivity extends PreferenceActivity
         mSubscriptionInfoHelper.setActionBarTitle(
                 getActionBar(), getResources(), R.string.voicemail_settings_with_label);
         mPhone = mSubscriptionInfoHelper.getPhone();
+        mSubscriptionManager = mPhone.getContext().getSystemService(SubscriptionManager.class);
         addPreferencesFromResource(R.xml.voicemail_settings);
 
-        mVoicemailNotificationPreference =
-                findPreference(getString(R.string.voicemail_notifications_key));
-        final Intent intent = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
-        intent.putExtra(Settings.EXTRA_CHANNEL_ID,
-                NotificationChannelController.CHANNEL_ID_VOICE_MAIL);
-        intent.putExtra(Settings.EXTRA_APP_PACKAGE, mPhone.getContext().getPackageName());
-        mVoicemailNotificationPreference.setIntent(intent);
+        /*Unisoc: change for bug 1151039@{ */
+        if (mPhone == null) {
+            finish();
+        } else {
+            mVoicemailNotificationPreference =
+                    findPreference(getString(R.string.voicemail_notifications_key));
+            final Intent intent = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_CHANNEL_ID,
+                    NotificationChannelController.CHANNEL_ID_VOICE_MAIL);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, mPhone.getContext().getPackageName());
+            mVoicemailNotificationPreference.setIntent(intent);
+            mActivityContainer = ActivityContainer.getInstance();
+            mActivityContainer.setApplication(getApplication());
+            mActivityContainer.addActivity(this, mPhone.getPhoneId());
+        }/* @} */
     }
 
     @Override
     protected void onResume() {
+        int subId = -1;
+        boolean isSubscriptionEnabled = false;
+
         super.onResume();
         mForeground = true;
 
@@ -259,7 +275,14 @@ public class VoicemailSettingsActivity extends PreferenceActivity
             mSubMenuVoicemailSettings.setParentActivity(this, VOICEMAIL_PREF_ID, this);
             mSubMenuVoicemailSettings.setDialogOnClosedListener(this);
             mSubMenuVoicemailSettings.setDialogTitle(R.string.voicemail_settings_number_label);
-            if (!getBooleanCarrierConfig(
+            //Unisoc: change for bug 930030 1144724 1170207
+            subId = mPhone.getSubId();
+            if (subId >= 0) {
+                isSubscriptionEnabled = mSubscriptionManager.isSubscriptionEnabled(subId);
+            }
+
+            if (!isSubscriptionEnabled ||
+                !getBooleanCarrierConfig(
                     CarrierConfigManager.KEY_EDITABLE_VOICEMAIL_NUMBER_SETTING_BOOL)) {
                 mSubMenuVoicemailSettings.setEnabled(false);
             }
@@ -272,6 +295,12 @@ public class VoicemailSettingsActivity extends PreferenceActivity
         mPreviousVMProviderKey = mVoicemailProviders.getValue();
 
         mVoicemailSettings = (PreferenceScreen) findPreference(BUTTON_VOICEMAIL_SETTING_KEY);
+        //add for unisoc 1186312 set home button invisible whe re-create activity
+        if (mVoicemailSettings != null && mVoicemailSettings.getDialog() != null
+                && mVoicemailSettings.getDialog().isShowing()
+                && mVoicemailSettings.getDialog().getActionBar() != null) {
+            mVoicemailSettings.getDialog().getActionBar().setDisplayHomeAsUpEnabled(false);
+        }
 
         maybeHidePublicSettings();
 
@@ -296,6 +325,8 @@ public class VoicemailSettingsActivity extends PreferenceActivity
 
         updateVoiceNumberField();
         mVMProviderSettingsForced = false;
+        // UNISOC: add for bug 1071620
+        mSubscriptionInfoHelper.addOnSubscriptionsChangedListener();
     }
 
     /**
@@ -318,6 +349,17 @@ public class VoicemailSettingsActivity extends PreferenceActivity
     public void onPause() {
         super.onPause();
         mForeground = false;
+        // UNISOC: add for bug 1071620
+        mSubscriptionInfoHelper.removeOnSubscriptionsChangedListener();
+    }
+
+    //Unisoc: change for bug 1151039
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
     }
 
     @Override
@@ -711,7 +753,8 @@ public class VoicemailSettingsActivity extends PreferenceActivity
         }
 
         // Throw a warning if the voicemail is the same and we did not change forwarding.
-        if (mNewVMNumber.equals(mOldVmNumber)
+        // UNISOC: change for bug1140272
+        if ((mNewVMNumber.equals(mOldVmNumber) || (TextUtils.isEmpty(mOldVmNumber) && TextUtils.isEmpty(mNewVMNumber)))
                 && mNewFwdSettings == VoicemailProviderSettings.NO_FORWARDING) {
             showDialogIfForeground(VoicemailDialogUtil.VM_NOCHANGE_ERROR_DIALOG);
             return;
@@ -1093,6 +1136,8 @@ public class VoicemailSettingsActivity extends PreferenceActivity
         mChangingVMorFwdDueToProviderChange = false;
         showDialogIfForeground(dialogId);
         updateVoiceNumberField();
+        // UNISOC: add for bug1091930
+        broadcastVoiceMailChangedIntent();
     }
 
     private void onRevertDone() {
@@ -1110,6 +1155,14 @@ public class VoicemailSettingsActivity extends PreferenceActivity
     //*********************************************************************************************
     // Voicemail State Helpers
     //*********************************************************************************************
+
+    /* UNISOC: add for bug1091930 @{ */
+    private void broadcastVoiceMailChangedIntent() {
+        if (DBG) log("broadcastVoiceMailChangedIntent, phoneId: " + mPhone.getPhoneId());
+        Intent intent = new Intent(VOICE_MAIL_CHANGE_INTENT);
+        mPhone.getContext().sendBroadcast(intent);
+    }
+    /* @} */
 
     /**
      * Return true if there is a change result for every reason for which we expect a result.

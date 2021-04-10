@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  pattern_type:
+    If not specified, default type is ICCID. The other optional type is 'mccmnc'.
+
+  pattern:
+    Pattern for matching ICCID or MCC/MNC. If not specified, SIM cards of any operator can be matched.
+
+  app_type:
+    If not specified, all UICC APP type can be matched.
+
+  priority: int
+    The bigger means the higher priority.
+
+  network: int
+    Default preferred network type of matched SIM card.
+
+  user_prompt:
+    Whether allowed popup primary card setting prompt after SIM cards changed.
+
+  roaming: bool
+    If true, this config can be matched only when in roaming state.
+
+  restricted_network(Special for operator version): int
+    Some operators require restrictions on the network capabilities of special SIM cards.
+
+  restricted_by(used in combination with 'restricted_network'):
+    Restricted by SIM card matched the special 'tag'.
+-->
+<iccConfigs>
+    <iccConfig tag="COMMON" app_type="APPTYPE_SIM" priority="1" />
+    <iccConfig tag="COMMON" app_type="APPTYPE_USIM" priority="2" user_prompt="true"/>
+</iccConfigs>

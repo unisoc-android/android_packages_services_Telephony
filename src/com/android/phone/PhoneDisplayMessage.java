@@ -21,6 +21,7 @@ import android.content.Context;
 import android.os.SystemProperties;
 import android.util.Log;
 import android.view.WindowManager;
+import android.app.KeyguardManager;
 
 /**
  * Helper class for displaying the a string triggered by a lower level Phone request
@@ -69,19 +70,32 @@ public class PhoneDisplayMessage {
         // using another activity to display the message.  This
         // places the message at the forefront of the UI.
         sDisplayMessageDialog = new AlertDialog.Builder(context)
-                .setIcon(android.R.drawable.ic_dialog_info)
+                .setIconAttribute(android.R.attr.alertDialogIcon)
                 .setTitle(title)
                 .setMessage(msg)
                 .setCancelable(true)
                 .create();
 
-        sDisplayMessageDialog.getWindow().setType(
-                WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+        // UNISOC: change for Bug1000712.
+        if (isKeyguardLocked()) {
+            sDisplayMessageDialog.getWindow().setType(
+                    WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
+        }else {
+            sDisplayMessageDialog.getWindow().setType(
+                    WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+        }
         sDisplayMessageDialog.getWindow().addFlags(
                 WindowManager.LayoutParams.FLAG_DIM_BEHIND);
 
         sDisplayMessageDialog.show();
         PhoneGlobals.getInstance().wakeUpScreen();
+    }
+
+    // UNISOC: add for Bug1000712.
+    private static boolean isKeyguardLocked() {
+        KeyguardManager keguard = PhoneGlobals.getInstance().getKeyguardManager();
+        if (DBG) log("isKeyguardLocked");
+        return keguard.isKeyguardLocked();
     }
 
     /**

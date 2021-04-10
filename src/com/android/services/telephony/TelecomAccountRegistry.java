@@ -54,6 +54,7 @@ import android.telephony.ims.stub.ImsRegistrationImplBase;
 import android.text.TextUtils;
 
 import com.android.ims.ImsManager;
+import com.android.ims.internal.ImsManagerEx;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
 import com.android.internal.telephony.SubscriptionController;
@@ -189,6 +190,7 @@ public class TelecomAccountRegistry {
             PhoneAccount account = buildPstnPhoneAccount(mIsEmergency, mIsDummy);
             // Register with Telecom and put into the account entry.
             mTelecomManager.registerPhoneAccount(account);
+            ImsManagerEx.notifyVideoCapabilityChange();//UNISOC: add for bug730182
             return account;
         }
 
@@ -246,7 +248,8 @@ public class TelecomAccountRegistry {
 
                 String slotIdString;
                 if (SubscriptionManager.isValidSlotIndex(slotId)) {
-                    slotIdString = Integer.toString(slotId);
+                    //UNISOC: modify by Bug895251
+                    slotIdString = Integer.toString(slotId + 1);
                 } else {
                     slotIdString = mContext.getResources().getString(R.string.unknown);
                 }
@@ -652,6 +655,7 @@ public class TelecomAccountRegistry {
         public void onVideoCapabilitiesChanged(boolean isVideoCapable) {
             mIsVideoCapable = isVideoCapable;
             synchronized (mAccountsLock) {
+                Log.i(this, "onVideoCapabilitiesChanged.isVideoCapable:"+isVideoCapable);//SPRD: add for bug730182
                 if (!mAccounts.contains(this)) {
                     // Account has already been torn down, don't try to register it again.
                     // This handles the case where teardown has already happened, and we got a video
@@ -817,6 +821,16 @@ public class TelecomAccountRegistry {
                         SubscriptionManager.INVALID_SUBSCRIPTION_ID);
                 handleCarrierConfigChange(subId);
             }
+        }
+    };
+
+    // UNISOC: Modify for bug890884
+    private BroadcastReceiver mLocaleChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.i(this, "Locale change; re-registering phone accounts.");
+            tearDownAccounts();
+            setupAccounts();
         }
     };
 
@@ -1083,6 +1097,10 @@ public class TelecomAccountRegistry {
         filter.addAction(CarrierConfigManager.ACTION_CARRIER_CONFIG_CHANGED);
         mContext.registerReceiver(mReceiver, filter);
 
+        // UNISOC: Modify for bug890884
+        mContext.registerReceiver(mLocaleChangeReceiver,
+                new IntentFilter(Intent.ACTION_LOCALE_CHANGED));
+
         // Listen to the RTT system setting so that we update it when the user flips it.
         ContentObserver rttUiSettingObserver = new ContentObserver(
                 new Handler(Looper.getMainLooper())) {
@@ -1186,7 +1204,7 @@ public class TelecomAccountRegistry {
                 if (mAccounts.isEmpty()) {
                     Log.i(this, "setupAccounts: adding default");
                     mAccounts.add(
-                            new AccountEntry(PhoneFactory.getDefaultPhone(), true /* emergency */,
+                            new AccountEntry(getPhoneWithPowerOn(), true /* emergency */,
                                     false /* isDummy */));
                 }
             }
@@ -1256,5 +1274,15 @@ public class TelecomAccountRegistry {
                 }
             }
         }
+    }
+
+    //UNISOC: add for bug1093756
+    private Phone getPhoneWithPowerOn() {
+        for (Phone phone : PhoneFactory.getPhones()) {
+            if (phone != null && phone.isRadioOn()) {
+                return phone;
+            }
+        }
+        return PhoneFactory.getDefaultPhone();
     }
 }

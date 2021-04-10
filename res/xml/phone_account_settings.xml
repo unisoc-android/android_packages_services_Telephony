@@ -31,6 +31,12 @@
                 android:targetPackage="com.android.server.telecom"
                 android:targetClass="com.android.server.telecom.settings.EnableAccountPreferenceActivity" />
         </PreferenceScreen>
+        <!-- SPRD: add for bug 1109918 @{ -->
+        <PreferenceScreen
+            android:key="no_available_phone_account"
+            android:title="@string/no_available_phone_accounts"
+            android:persistent="false" />
+        <!-- @} -->
 
     </PreferenceCategory>
 

@@ -140,8 +140,9 @@
                             android:textColor="@android:color/white"
                             android:textAppearance="?android:attr/textAppearanceButton" />
                         <TextView
-                            android:layout_width="wrap_content"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:gravity="center"
                             android:id="@+id/launch_hint"
                             android:maxLines="1"
                             android:autoSizeTextType="uniform"

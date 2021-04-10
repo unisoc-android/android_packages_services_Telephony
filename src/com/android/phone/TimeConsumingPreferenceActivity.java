@@ -9,8 +9,12 @@ import android.preference.PreferenceActivity;
 import android.util.Log;
 import android.view.WindowManager;
 
+import com.android.ims.ImsManager;
 import com.android.internal.telephony.CommandException;
+import com.android.internal.telephony.Phone;
 
+import android.os.Bundle;
+import android.os.PersistableBundle;
 import java.util.ArrayList;
 
 interface  TimeConsumingPreferenceListener {
@@ -18,6 +22,9 @@ interface  TimeConsumingPreferenceListener {
     public void onFinished(Preference preference, boolean reading);
     public void onError(Preference preference, int error);
     public void onException(Preference preference, CommandException exception);
+    /* UNISOC: add for FEATURE_VIDEO_CALL_FOR @{ */
+    public void onEnableStatus(Preference preference, int status);
+    /* @} */
 }
 
 public class TimeConsumingPreferenceActivity extends PreferenceActivity
@@ -26,10 +33,22 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
     private static final String LOG_TAG = "TimeConsumingPrefActivity";
     private final boolean DBG = (PhoneGlobals.DBG_LEVEL >= 2);
 
+    private Phone mPhone = null;
+    private ImsManager mImsManager = null;
+
+    // add for Bug 1071722
+    public void initParent(Phone phone) {
+        mPhone = phone;
+        if (mPhone != null) {
+            mImsManager = new ImsManager(this, mPhone.getPhoneId());
+        }
+    }
+
     private class DismissOnClickListener implements DialogInterface.OnClickListener {
         @Override
         public void onClick(DialogInterface dialog, int which) {
             dialog.dismiss();
+            finish();//UNISOC: add for bug 952922
         }
     }
     private class DismissAndFinishOnClickListener implements DialogInterface.OnClickListener {
@@ -45,7 +64,6 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
 
     private static final int BUSY_READING_DIALOG = 100;
     private static final int BUSY_SAVING_DIALOG = 200;
-
     static final int EXCEPTION_ERROR = 300;
     static final int RESPONSE_ERROR = 400;
     static final int RADIO_OFF_ERROR = 500;
@@ -54,10 +72,18 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
     static final int STK_CC_SS_TO_USSD_ERROR = 800;
     static final int STK_CC_SS_TO_SS_ERROR = 900;
     static final int STK_CC_SS_TO_DIAL_VIDEO_ERROR = 1000;
+    // UNISOC: add for bug1071722
+    static final int VOLTE_NOT_SUPPORT_ERROR = 1100;
+    private static final String SAVE_DIALOG_PREFERENCE_KEY = "save_dialog_preference_key";
+    private static final String SAVE_DIALOG_ERROR = "save_dialog_error";
+    private static final String BUTTON_CLIR_KEY = "button_clir_key";
+
 
     private final ArrayList<String> mBusyList = new ArrayList<String>();
 
     protected boolean mIsForeground = false;
+    private String  mDlgPrerenceKey;
+    private int mDlgError = -1;
 
     @Override
     protected Dialog onCreateDialog(int id) {
@@ -83,7 +109,8 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
         if (id == RESPONSE_ERROR || id == RADIO_OFF_ERROR || id == EXCEPTION_ERROR
                 || id == FDN_CHECK_FAILURE || id == STK_CC_SS_TO_DIAL_ERROR
                 || id == STK_CC_SS_TO_USSD_ERROR || id == STK_CC_SS_TO_SS_ERROR
-                || id == STK_CC_SS_TO_DIAL_VIDEO_ERROR) {
+                || id == STK_CC_SS_TO_DIAL_VIDEO_ERROR
+                || id == VOLTE_NOT_SUPPORT_ERROR) {
             AlertDialog.Builder builder = new AlertDialog.Builder(this);
 
             int msgId;
@@ -119,6 +146,10 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
                     msgId = R.string.stk_cc_ss_to_dial_video_error;
                     builder.setPositiveButton(R.string.close_dialog, mDismiss);
                     break;
+                case VOLTE_NOT_SUPPORT_ERROR:
+                    msgId = R.string.volte_not_supported_error;
+                    builder.setPositiveButton(R.string.close_dialog, mDismiss);
+                    break;
                 case EXCEPTION_ERROR:
                 default:
                     msgId = R.string.exception_error;
@@ -140,10 +171,22 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
         return null;
     }
 
+    /* UNISOC: add for 1184393 show dialog when recreate activity @{ */
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        mDlgPrerenceKey = savedInstanceState != null ? savedInstanceState.getString(SAVE_DIALOG_PREFERENCE_KEY) : null;
+        mDlgError = savedInstanceState != null ? savedInstanceState.getInt(SAVE_DIALOG_ERROR) : -1;
+    }
+    /* @} */
+
+
     @Override
     public void onResume() {
         super.onResume();
         mIsForeground = true;
+        // UNISOC: add for bug1024083
+        showErrorDialogAgain();
     }
 
     @Override
@@ -187,13 +230,54 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
     @Override
     public void onError(Preference preference, int error) {
         if (DBG) dumpState();
+        if (preference == null) {
+            return;
+        }
         Log.i(LOG_TAG, "onError, preference=" + preference.getKey() + ", error=" + error);
+        // add for Bug 1071722
+        if (getResources().getBoolean(R.bool.config_display_ut_not_support_message_for_cdma)
+                && mPhone != null && mImsManager != null
+                && mImsManager.isEnhanced4gLteModeSettingEnabledByUser()
+                && PhoneUtils.isCtCard(this, mPhone.getPhoneId())
+                && mPhone.getImsPhone() != null
+                && !mPhone.getImsPhone().isUtEnabled()) {
+            Log.d(LOG_TAG, "change error code to VOLTE_NOT_SUPPORT_ERROR.");
+            error = VOLTE_NOT_SUPPORT_ERROR;
+        }
 
         if (mIsForeground) {
-            showDialog(error);
+            /* UNISOC: add for feature not show error dialog for clir @{ */
+            if (preference instanceof CLIRListPreference) {
+                preference.setSummary(R.string.sum_default_caller_id);
+            } else {
+                showDialog(error);
+            }
+            /* @} */
         }
+        // UNISOC: add for bug1024083
+        if(!mIsForeground) {
+            saveDialogInfo(preference.getKey(), error);
+        }
+
         preference.setEnabled(false);
     }
+
+    /* UNISOC: add for bug1024083 @{ */
+    private void saveDialogInfo(String preferenceKey, int error){
+        mDlgPrerenceKey = preferenceKey;
+        mDlgError = error;
+    }
+
+    private void showErrorDialogAgain(){
+        if(mDlgPrerenceKey != null && mDlgError != -1){
+            if (!BUTTON_CLIR_KEY.equals(mDlgPrerenceKey)) {
+                showDialog(mDlgError);
+            }
+            mDlgError = -1;
+            mDlgPrerenceKey = null;
+        }
+    }
+    /* @} */
 
     @Override
     public void onException(Preference preference, CommandException exception) {
@@ -239,4 +323,21 @@ public class TimeConsumingPreferenceActivity extends PreferenceActivity
         }
         Log.d(LOG_TAG, "dumpState end");
     }
+    /* UNISOC: add for FEATURE_VIDEO_CALL_FOR @{ */
+    @Override
+    public void onEnableStatus(Preference preference, int status) {
+    }
+
+    /* @} */
+    /* UNISOC: add for 1184393 if onError is reported when activity is background, save it
+       and show dialog when it's re-created. @{ */
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (mDlgPrerenceKey != null) {
+            outState.putString(SAVE_DIALOG_PREFERENCE_KEY, mDlgPrerenceKey);
+            outState.putInt(SAVE_DIALOG_ERROR, mDlgError);
+        }
+    }
+    /* @} */
 }

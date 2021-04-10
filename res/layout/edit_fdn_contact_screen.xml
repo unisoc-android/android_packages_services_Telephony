@@ -32,6 +32,7 @@
         android:scrollHorizontally="true"
         android:autoText="false"
         android:capitalize="words"
+        android:maxLength="14"
         android:textAlignment="viewStart" />
 
     <EditText android:id="@+id/fdn_number"
@@ -44,6 +45,7 @@
         android:scrollHorizontally="true"
         android:autoText="false"
         android:capitalize="none"
+        android:maxLength="@integer/key_fdn_number_length"
         android:textAlignment="viewStart" />
 
     <Button android:id="@+id/button"

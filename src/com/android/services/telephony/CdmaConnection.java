@@ -182,6 +182,14 @@ final class CdmaConnection extends TelephonyConnection {
         if (mAllowMute) {
             capabilities |= CAPABILITY_MUTE;
         }
+        /* UNISOC: support call hold for cdma connection. @{ */
+        if (!shouldTreatAsEmergencyCall()) {
+            capabilities |= CAPABILITY_SUPPORT_HOLD;
+            if (isHoldable() && (getState() == STATE_ACTIVE || getState() == STATE_HOLDING)) {
+                capabilities |= CAPABILITY_HOLD;
+            }
+        }
+        /* @} */
         return capabilities;
     }
 

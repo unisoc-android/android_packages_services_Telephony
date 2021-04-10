@@ -257,13 +257,27 @@ final class TelephonyConferenceController {
                         phoneAccountHandle = PhoneUtils.makePstnPhoneAccountHandle(
                                 telephonyConnection.getPhone());
                     }
-
+                    // UNISOC: use cpu time instead of system time
+                    long childDurationMillis = Long.MIN_VALUE;
                     mTelephonyConference = new TelephonyConference(phoneAccountHandle);
                     for (Connection connection : conferencedConnections) {
                         Log.d(this, "Adding a connection to a conference call: %s %s",
                                 mTelephonyConference, connection);
                         mTelephonyConference.addConnection(connection);
+                        /* UNISOC: use cpu time instead of system time @{ */
+                        if (((TelephonyConnection) connection).getOriginalConnection() != null) {
+                            childDurationMillis = Math.max(((TelephonyConnection) connection).
+                                    getOriginalConnection().getDurationMillis(),
+                                    childDurationMillis);
+                        }
+                        /* @} */
                     }
+                    /* UNISOC: use cpu time instead of system time @{ */
+                    if (childDurationMillis != Long.MIN_VALUE) {
+                        mTelephonyConference.
+                        setConnectTimeMillis(System.currentTimeMillis() - childDurationMillis);
+                    }
+                    /* @} */
                     mTelephonyConference.updateCallRadioTechAfterCreation();
                     mConnectionService.addConference(mTelephonyConference);
                 } else {

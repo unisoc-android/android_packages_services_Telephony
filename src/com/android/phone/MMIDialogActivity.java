@@ -76,6 +76,9 @@ public class MMIDialogActivity extends Activity {
         Log.d(TAG, "onCreate; registering for mmi complete.");
         mCM.registerForMmiComplete(mHandler, PhoneGlobals.MMI_COMPLETE, null);
         showMMIDialog();
+        /* UNISOC: Modify for Bug 1111998 @{ */
+        PhoneGlobals.getInstance().setMMIDialogActivity(this);
+        /* @} */
     }
 
     @Override
@@ -90,6 +93,9 @@ public class MMIDialogActivity extends Activity {
             mCM.unregisterForMmiComplete(mHandler);
             mHandler = null;
         }
+        /* UNISOC: Modify for Bug 1111998 @{ */
+        PhoneGlobals.getInstance().setMMIDialogActivity(null);
+        /* @} */
     }
 
     private void showMMIDialog() {

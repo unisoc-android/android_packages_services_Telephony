@@ -15,7 +15,9 @@ LOCAL_JAVA_LIBRARIES := \
         voip-common \
         ims-common \
         org.apache.http.legacy \
-        libprotobuf-java-lite
+        libprotobuf-java-lite \
+        radio_interactor_common \
+        unisoc_ims_common
 
 LOCAL_STATIC_ANDROID_LIBRARIES := \
         androidx.appcompat_appcompat \

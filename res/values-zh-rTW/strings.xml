@@ -63,7 +63,7 @@
     <string name="phone_accounts" msgid="6376603393888116364">"通話帳戶"</string>
     <string name="phone_accounts_make_calls_with" msgid="1969188078933152231">"選擇通話帳戶"</string>
     <string name="phone_accounts_make_sip_calls_with" msgid="4677789312053828493">"選擇 SIP 通話帳戶"</string>
-    <string name="phone_accounts_ask_every_time" msgid="4346499067149985702">"先詢問我"</string>
+    <string name="phone_accounts_ask_every_time" msgid="4346499067149985702">"每次都詢問"</string>
     <string name="phone_accounts_default_account_label" msgid="4183772241814460014">"無法連上網路"</string>
     <string name="phone_accounts_settings_header" msgid="4141710640883261094">"設定"</string>
     <string name="phone_accounts_choose_accounts" msgid="5232948804226424002">"選擇帳戶"</string>
@@ -401,7 +401,7 @@
     <string name="manage_fdn_list" msgid="8777755791892122369">"固定撥號清單"</string>
     <string name="fdn_list_with_label" msgid="7437232552210469217">"FDN 清單 (<xliff:g id="SUBSCRIPTIONLABEL">%s</xliff:g>)"</string>
     <string name="fdn_activation" msgid="2156479741307463576">"啟用固定撥號"</string>
-    <string name="fdn_enabled" msgid="5238109009915521240">"已啟用 [固定撥號]"</string>
+    <string name="fdn_enabled" msgid="5238109009915521240">"已啟用固定撥號"</string>
     <string name="fdn_disabled" msgid="4700049736675368279">"已停用固定撥號"</string>
     <string name="enable_fdn" msgid="3740191529180493851">"啟用固定撥號"</string>
     <string name="disable_fdn" msgid="7944020890722540616">"停用固定撥號"</string>
@@ -427,16 +427,17 @@
     <string name="number" msgid="7905950798349903858">"號碼"</string>
     <string name="save" msgid="4094274636321939086">"儲存"</string>
     <string name="add_fdn_contact" msgid="2481915899633353976">"新增固定撥號"</string>
-    <string name="adding_fdn_contact" msgid="7627379633721940991">"正在新增固定撥號…"</string>
+    <string name="adding_fdn_contact" msgid="7627379633721940991">"正在更新固定撥號連絡人，請勿重複操作。"</string>
     <string name="fdn_contact_added" msgid="7458335758501736665">"已新增固定撥號。"</string>
     <string name="edit_fdn_contact" msgid="7976936035587081480">"編輯固定撥號"</string>
-    <string name="updating_fdn_contact" msgid="8370929876849803600">"正在更新固定撥號…"</string>
+    <string name="updating_fdn_contact" msgid="8370929876849803600">"正在更新固定撥號，請勿重複操作。"</string>
     <string name="fdn_contact_updated" msgid="5497828782609005017">"固定撥號已更新。"</string>
     <string name="delete_fdn_contact" msgid="6668958073074151717">"刪除固定撥號"</string>
     <string name="deleting_fdn_contact" msgid="5669163206349319969">"正在刪除固定撥號…"</string>
     <string name="fdn_contact_deleted" msgid="7154162327112259569">"已刪除固定撥號。"</string>
-    <string name="pin2_invalid" msgid="5470854099230755944">"您所輸入的 PIN 不正確，因此未更新 FDN。"</string>
-    <string name="fdn_invalid_number" msgid="2062898833049589309">"固定撥號的號碼超過 20 位數，因此無法更新。"</string>
+    <string name="pin2_invalid" msgid="5470854099230755944">"您所輸入的 PIN2 不正確，因此未更新 FDN。"</string>
+    <!-- UNISOC: modify for bug889286 -->
+    <string name="fdn_invalid_number" msgid="2062898833049589309">"固定撥號的號碼超過 <xliff:g id="FDN_NUMBER_LIMIT_LENGTH">%d</xliff:g> 位數，因此無法更新。"</string>
     <string name="pin2_or_fdn_invalid" msgid="6025144083384701197">"未更新 FDN。可能是因為 PIN2 碼不正確或電話號碼遭拒。"</string>
     <string name="fdn_failed" msgid="540018079008319747">"FDN 操作失敗。"</string>
     <string name="simContacts_emptyLoading" msgid="2203331234764498011">"正在從 SIM 卡讀取…"</string>
@@ -624,7 +625,7 @@
     <string name="preference_category_ringtone" msgid="5197960752529332721">"鈴聲與震動"</string>
     <string name="pstn_connection_service_label" msgid="1743245930577325900">"內建 SIM 卡"</string>
     <string name="enable_video_calling_title" msgid="7237253660669000899">"開啟視訊通話"</string>
-    <string name="enable_video_calling_dialog_msg" msgid="8948186136957417948">"您必須在網路設定中啟用加強型 4G LTE 模式，才能開啟視訊通話功能。"</string>
+    <string name="enable_video_calling_dialog_msg" msgid="8948186136957417948">"您必須在網路設定中啟用增強型 4G LTE 模式，才能開啟視訊通話功能。"</string>
     <string name="enable_video_calling_dialog_settings" msgid="576528473599603249">"網路設定"</string>
     <string name="enable_video_calling_dialog_close" msgid="7411471282167927991">"關閉"</string>
     <string name="sim_label_emergency_calls" msgid="4847699229529306397">"緊急電話"</string>
@@ -743,7 +744,7 @@
     <string name="call_barring_deactivate_success" msgid="8014685598632000936">"已停用通話限制設定"</string>
     <string name="call_barring_change_pwd" msgid="6887420609726284232">"變更密碼"</string>
     <string name="call_barring_change_pwd_description" msgid="5505087790260233953">"變更通話限制密碼"</string>
-    <string name="call_barring_change_pwd_description_disabled" msgid="7630770327645349957">"無法變更通話限制密碼。"</string>
+    <string name="call_barring_change_pwd_description_disabled" msgid="7630770327645349957">"無法變更通話限制密碼"</string>
     <string name="call_barring_pwd_not_match" msgid="6716711689350314525">"密碼不符"</string>
     <string name="call_barring_right_pwd_number" msgid="2902966502520410446">"輸入 4 位數密碼"</string>
     <string name="call_barring_change_pwd_success" msgid="3278310763742760321">"密碼已變更"</string>
@@ -782,4 +783,6 @@
     <string name="supp_service_over_ut_precautions_dual_sim" msgid="1682814794340311300">"如要使用<xliff:g id="SUPP_SERVICE">%1$s</xliff:g>，請確認 SIM 卡 <xliff:g id="SIM_NUMBER">%2$d</xliff:g> 的行動數據功能已開啟。你可以前往行動網路設定進行變更。"</string>
     <string name="supp_service_over_ut_precautions_roaming_dual_sim" msgid="8062345092837168385">"如要使用<xliff:g id="SUPP_SERVICE">%1$s</xliff:g>，請確認 SIM 卡 <xliff:g id="SIM_NUMBER">%2$d</xliff:g> 的行動數據功能和漫遊服務已開啟。你可以前往行動網路設定進行變更。"</string>
     <string name="supp_service_over_ut_precautions_dialog_dismiss" msgid="5061044213859557398">"關閉"</string>
+    <!-- UNISOC: Bug 1072957 Reliance block notification. -->
+    <string name="blocked_call_notification">"攔截電話"</string>
 </resources>

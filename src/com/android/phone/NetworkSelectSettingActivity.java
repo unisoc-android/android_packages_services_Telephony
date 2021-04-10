@@ -46,7 +46,11 @@ public class NetworkSelectSettingActivity extends Activity {
     public void onCreate(Bundle savedState) {
         Log.d(TAG, "onCreate()");
         super.onCreate(savedState);
-        int subId = getIntent().getExtras().getInt(KEY_SUBSCRIPTION_ID);
+        int subId = getIntent().getExtras() == null ? -1 : getIntent().getExtras().getInt(KEY_SUBSCRIPTION_ID, -1);
+        if (subId < 0) {
+            finish();
+            return;
+        }
         setContentView(R.layout.choose_network);
 
         FragmentManager fragmentManager = getFragmentManager();

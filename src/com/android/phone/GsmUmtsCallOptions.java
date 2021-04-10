@@ -16,6 +16,7 @@
 
 package com.android.phone;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.PersistableBundle;
 import android.preference.Preference;
@@ -32,7 +33,9 @@ public class GsmUmtsCallOptions extends PreferenceActivity {
 
     public static final String CALL_FORWARDING_KEY = "call_forwarding_key";
     public static final String CALL_BARRING_KEY = "call_barring_key";
-    private static final String ADDITIONAL_GSM_SETTINGS_KEY = "additional_gsm_call_settings_key";
+    public static final String ADDITIONAL_GSM_SETTINGS_KEY = "additional_gsm_call_settings_key";
+    // UNISOC: add function IP dial for bug 1067141
+    private static final String IP_DIAL_KEY = "ip_dial_key";
 
     @Override
     protected void onCreate(Bundle icicle) {
@@ -61,6 +64,7 @@ public class GsmUmtsCallOptions extends PreferenceActivity {
         return super.onOptionsItemSelected(item);
     }
 
+    /* SPRD: add for bug983978 @{ */
     public static void init(PreferenceScreen prefScreen, SubscriptionInfoHelper subInfoHelper) {
         PersistableBundle b = null;
         if (subInfoHelper.hasSubId()) {
@@ -69,12 +73,19 @@ public class GsmUmtsCallOptions extends PreferenceActivity {
             b = PhoneGlobals.getInstance().getCarrierConfig();
         }
 
+        int phoneType = subInfoHelper.getPhone().getPhoneType();
         Preference callForwardingPref = prefScreen.findPreference(CALL_FORWARDING_KEY);
         if (callForwardingPref != null) {
             if (b != null && b.getBoolean(
                     CarrierConfigManager.KEY_CALL_FORWARDING_VISIBILITY_BOOL)) {
-                callForwardingPref.setIntent(
-                        subInfoHelper.getIntent(GsmUmtsCallForwardOptions.class));
+                /* UNISOC: FEATURE_CDMA_CALL_FOR @{ */
+                if (phoneType == PhoneConstants.PHONE_TYPE_CDMA) {
+                    callForwardingPref.setIntent(subInfoHelper.getIntent(CdmaCallForwardOptions.class));
+                } else {
+                    //UNISOC: porting by bug1071416
+                    callForwardingPref.setIntent(
+                            subInfoHelper.getIntent(GsmUmtsAllCallForwardOptions.class));
+                }
             } else {
                 prefScreen.removePreference(callForwardingPref);
             }
@@ -86,7 +97,8 @@ public class GsmUmtsCallOptions extends PreferenceActivity {
             if (b != null && (b.getBoolean(
                     CarrierConfigManager.KEY_ADDITIONAL_SETTINGS_CALL_WAITING_VISIBILITY_BOOL)
                     || b.getBoolean(
-                    CarrierConfigManager.KEY_ADDITIONAL_SETTINGS_CALLER_ID_VISIBILITY_BOOL))) {
+                    CarrierConfigManager.KEY_ADDITIONAL_SETTINGS_CALLER_ID_VISIBILITY_BOOL))
+                    && phoneType != PhoneConstants.PHONE_TYPE_CDMA) {
                 additionalGsmSettingsPref.setIntent(
                         subInfoHelper.getIntent(GsmUmtsAdditionalCallOptions.class));
             } else {
@@ -96,11 +108,22 @@ public class GsmUmtsCallOptions extends PreferenceActivity {
 
         Preference callBarringPref = prefScreen.findPreference(CALL_BARRING_KEY);
         if (callBarringPref != null) {
-            if (b != null && b.getBoolean(CarrierConfigManager.KEY_CALL_BARRING_VISIBILITY_BOOL)) {
+            if (b != null && b.getBoolean(CarrierConfigManager.KEY_CALL_BARRING_VISIBILITY_BOOL)
+                    && phoneType != PhoneConstants.PHONE_TYPE_CDMA) {
                 callBarringPref.setIntent(subInfoHelper.getIntent(GsmUmtsCallBarringOptions.class));
             } else {
                 prefScreen.removePreference(callBarringPref);
             }
         }
+        /* UNISOC: function IP dial support for bug 1067141 @{ */
+        Preference ipDialPref = prefScreen.findPreference(IP_DIAL_KEY);
+        Intent ipDialIntent = subInfoHelper.getCallSettingsIntent(null, ipDialPref.getIntent());
+        boolean isShowIPFeature = subInfoHelper.isShowIPFeature();
+        if (ipDialIntent != null && isShowIPFeature) {
+            ipDialPref.setIntent(ipDialIntent);
+        } else {
+            prefScreen.removePreference(ipDialPref);
+        }
+        /* @} */
     }
 }

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--  Copyright (C) 2007 The Android Open Source Project
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+ -->
+
+<resources xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- UNISOC: Add for dealing with SS notification @{ -->
+    <string name="CallForwarded">"呼叫轉接"</string>
+    <string name="CallWaiting">"呼叫等待中"</string>
+    <string name="IncomingCallForwarded">"另一通來電被轉接"</string>
+    <string name="OutCallBarred">"禁止呼出"</string>
+    <string name="InCallBarred">"禁止呼入"</string>
+    <string name="ActiveUnconCf">"無條件來電轉接啟動"</string>
+    <string name="ForwardedCall">"轉移呼叫"</string>
+    <string name="CallHold">"呼叫被保持"</string>
+    <string name="CallRetrieved">"呼叫被啟動"</string>
+    <string name="MultiCall">"電話會議"</string>
+    <string name="ActiveConCf">"有條件來電轉接啟動"</string>
+    <!-- @} -->
+    <!--  UNISOC: add for FEATURE_VIDEO_CALL_FOR @{ -->
+    <string name="video_call_forward_setting_category_header">"視訊通話"</string>
+    <string name="labelAudioCF">"語音來電轉接"</string>
+    <string name="labelVideoCF">"視訊來電轉接"</string>
+    <!-- @} -->
+    <!--  UNISOC: add for feature 1071416 durationforward @{ -->
+    <string name="labelCFT">固定時間段轉接</string>
+    <string name="sum_cft_disabled">"未啟用"</string>
+    <string name="start_time">開始時間</string>
+    <string name="stop_time">結束時間</string>
+    <string name="phonenumCFT_title">轉接號碼</string>
+    <string name="sum_cft_default_setting">未設定</string>
+    <string name="messageCFT">固定時間段的轉接號碼</string>
+    <!-- @} -->
+    <!-- UNISOC: add for ussd customized feature 1072636 @{ -->
+    <string name="menu_add_to_contacts">"新增至聯絡人"</string>
+    <string name="select_link_title">"選擇操作"</string>
+    <string name="confirm_open_browser_dialog_title">"打開瀏覽器"</string>
+    <string name="confirm_open_browser_dialog_message">"是否要打開瀏覽器？"</string>
+    <!-- @} -->
+    <string name="turn_off_airplane_for_ss">"請先關閉飛行模式再操作補充業務服務。"</string>
+    <string name="emergency_call">"緊急電話"</string>
+    <string name="turn_off_airplane_mode_for_emergency_call">"要撥打緊急電話，請先關閉飛航模式。"</string>
+    <!--UNISOC: IP dial feature. @{ -->
+    <string name="ip_dialing_setting">"IP 撥號設定"</string>
+    <!-- UNISOC: FEATURE_FDN. @{ -->
+    <string name="edit_and_save_fdn">"編輯固定撥號聯絡人"</string>
+    <string name="delete_and_save_fdn">"刪除固定撥號聯絡人"</string>
+    <string name="call_fdn_number_by_sim">"呼叫"</string>
+    <string name="vt_call_fdn_numberr_by_sim">"視訊通話"</string>
+    <string name="airplane_changed_on">"飛航模式已開啟。"</string>
+    <string name="number_empty" msgid="">號碼是空</string>
+    <string name="wait_message">"請稍後..."</string>
+    <string name="unblock_pin2">"解鎖PIN2"</string>
+    <string name="sum_fdn_unblock_pin2">"輸入PUK2來解鎖您的SIM卡"</string>
+    <string name="oldPin2_Label">"舊 PIN2 (剩餘次數 <xliff:g>%s</xliff:g>)"</string>
+    <string name="pin2_Label">"PIN2 (剩餘次數 <xliff:g>%s</xliff:g>)"</string>
+    <string name="puk2_code_label">"輸入 PUK2 碼 (剩餘次數 <xliff:g>%s</xliff:g>)"</string>
+    <string name="promptWordOne">"您還有&#160;"</string>
+    <string name="promptWordTwo">"&#160;次機會"</string>
+    <string name="adn_full">FDN清單已滿</string>
+    <string name="fdn_invalid_name">"名稱超過 14 位的上限，因此未更新 FDN。"</string>
+    <string name="label_fdn">固定撥號</string>
+    <string name="notification_channel_fdn">"固定撥號"</string>
+    <string name="notification_channel_block_call">"攔截電話"</string>
+    <!-- SPRD: Add disAllow plmn list as Plmn_Black_List & modify for bug 725361. -->
+    <string name="plmn_disallow_plmn_toast">"該PLMN暫不支援IMS業務。"</string>
+    <!-- @} -->
+    <string name="number_limited_message">"您沒有插入Orange SIM，該號碼限制撥出，請重試。"</string>
+    <!--UNISOC: modify for CDMA-->
+    <string name="labelCFC">"取消所有呼叫轉移"</string>
+    <!-- UNISOC: FL0108100003: One key simlock @{ -->
+    <string name="one_key_locked_notification">此類型已解鎖，是否需要一鍵上鎖？</string>
+    <string name="one_key_unlocked_notification">此類型已被鎖，是否需要一鍵解鎖？</string>
+    <string name="one_key_unlocked">解鎖</string>
+    <string name="one_key_locked">上鎖</string>
+    <string name="one_key_operation_success">操作成功，裝置即將重啓！</string>
+    <string name="one_key_operation_unsuccess">操作失敗，請稍後嘗試！</string>
+    <string name="one_key_query_unsuccess">查詢鎖類型失敗！</string>
+    <string name="one_key_simlock_setting">SIMLOCK 設定</string>
+    <string-array name="one_key_sim_lock_type">
+        <item>網路鎖</item>
+        <item>網路子鎖</item>
+        <item>服務提供商鎖</item>
+        <item>合作商鎖</item>
+        <item>SIM卡鎖</item>
+    </string-array>
+    <!-- @} -->
+    <!--UNISOC: Only handle pin entry when phone user is system-->
+    <string name="mmi_not_allowed_user_restriction">"設備機主僅允許撥打緊急呼救電話。"</string>
+    <!-- UNISOC: The emergency dial can only modify the PIN code of SIM1.-->
+    <string name="change_pin_when_double_sim_card_info">"雙卡時緊急撥號盤只能修改SIM1的PIN碼。"</string>
+    <!-- UNISOC: add for bug589602 -->
+    <string name="sim_label">"SIM%1$d "</string>
+    <string name="volte_not_supported_error">SIM卡可能沒有開通VoLTE業務,請關閉VoLTE開關後重試 </string>
+    <!--UNISOC: modify for bug 1109918 -->
+    <string name="no_available_phone_accounts">"沒有可用的通話帳戶"</string>
+    <!-- UNISOC: add for bug1118484 -->
+    <string name="enhanced_4g_lte_unuseable">當前網路VoLTE無服務，是否關閉VoLTE高品質通話?</string>
+    <!-- UNISOC: add for bug1141115 -->
+    <string name="enable_video_calling_dialog_auto_msg">"您必須在網路設定中啟用%s模式，才能開啟視訊通話功能。"</string>
+    <!-- UNISOC: add for bug1155247 -->
+    <string name="enhanced_4g_lte_mode_title" msgid="2544026384901010606">"VoLTE"</string>
+    <string name="enhanced_4g_lte_mode_title_advanced_calling" msgid="480304128966864221">"進階通話功能"</string>
+    <string name="enhanced_4g_lte_mode_title_4g_calling" msgid="6839553611093179243">"4G 通話功能"</string>
+    <string name="network_not_on">"當前數據連接處於關閉狀態，是否開啟數據連接？"</string>
+</resources>

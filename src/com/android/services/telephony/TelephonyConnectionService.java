@@ -25,6 +25,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.PersistableBundle;
 import android.provider.Settings;
 import android.telecom.Conference;
 import android.telecom.Connection;
@@ -36,6 +37,7 @@ import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManagerEx;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.RadioAccessFamily;
 import android.telephony.ServiceState;
@@ -44,6 +46,7 @@ import android.telephony.TelephonyManager;
 import android.telephony.emergency.EmergencyNumber;
 import android.text.TextUtils;
 import android.util.Pair;
+import android.media.ToneGenerator;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.telephony.Call;
@@ -62,6 +65,7 @@ import com.android.internal.telephony.imsphone.ImsPhone;
 import com.android.internal.telephony.imsphone.ImsPhoneConnection;
 import com.android.phone.MMIDialogActivity;
 import com.android.phone.PhoneUtils;
+import com.android.phone.LimitedNumberHelper;
 import com.android.phone.R;
 
 import java.lang.ref.WeakReference;
@@ -177,6 +181,10 @@ public class TelephonyConnectionService extends ConnectionService {
     @VisibleForTesting
     public Pair<WeakReference<TelephonyConnection>, Queue<Phone>> mEmergencyRetryCache;
 
+    // UNISOC: updatePhoneAccount when chosenPhone changed
+    private boolean mNeedUpdatePhoneAccount = false;
+    private PhoneAccountHandle mNeedUpdatePhoneAccountHandle;
+
     /**
      * Keeps track of the status of a SIM slot.
      */
@@ -188,6 +196,8 @@ public class TelephonyConnectionService extends ConnectionService {
         public boolean isLocked = false;
         // Is the emergency number associated with the slot
         public boolean hasDialedEmergencyNumber = false;
+        //UNISOC: add simState
+        public int simState;
 
         public SlotStatus(int slotId, int capabilities) {
             this.slotId = slotId;
@@ -395,6 +405,25 @@ public class TelephonyConnectionService extends ConnectionService {
                                 android.telephony.DisconnectCause.INVALID_NUMBER,
                                 "Unable to parse number"));
             }
+            /** UNISOC: add for bug1072674 @{ */
+            if(LimitedNumberHelper.getInstance().isLimitedNumber(number)) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    // do nothing
+                }
+                int errorMessageId = R.string.number_limited_message;
+                String disconnectCauseLabel = getApplicationContext().getString(errorMessageId);
+                DisconnectCause disconnectCause =
+                new DisconnectCause(
+                      DisconnectCause.ERROR,
+                      "",
+                      disconnectCauseLabel,
+                      "Number is limited by operator.",
+                      ToneGenerator.TONE_UNKNOWN);
+                return Connection.createFailedConnection(disconnectCause);
+            }
+            /** @} */
 
             final Phone phone = getPhoneForAccount(request.getAccountHandle(),
                     false /* isEmergencyCall*/, null /* not an emergency call */);
@@ -453,6 +482,29 @@ public class TelephonyConnectionService extends ConnectionService {
         boolean needToTurnOnRadio = (isEmergencyNumber && (!isRadioOn() || isAirplaneModeOn))
                 || isRadioPowerDownOnBluetooth();
 
+        /*Unisoc:add for bug1009987, cellC try ECall on Vowifi first, do not disable airplane mode @{*/
+        boolean eccVowifiWhenAirplaneMode = false;
+        if (isEmergencyNumber && isAirplaneModeOn) {
+            final Phone emergencyPhone = getPhoneForAccount(request.getAccountHandle(), isEmergencyNumber, numberToDial);
+            if (emergencyPhone != null && emergencyPhone.isWifiCallingEnabled()) {
+                CarrierConfigManager cfgManager = (CarrierConfigManager)
+                        emergencyPhone.getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
+                if (cfgManager != null) {
+                    PersistableBundle config = cfgManager.getConfigForSubId(emergencyPhone.getSubId());
+                    if (config != null) {
+                        eccVowifiWhenAirplaneMode =
+                                config.getBoolean(CarrierConfigManagerEx.KEY_CARRIER_SUPPORTS_VOWIFI_EMERGENCY_CALL)
+                                && config.getBoolean(CarrierConfigManagerEx.KEY_CARRIER_DIAL_ECC_VOWIFI_WHEN_AIRPLANE);
+                    }
+                }
+            }
+        }
+
+        if (isEmergencyNumber && isAirplaneModeOn && eccVowifiWhenAirplaneMode) {
+            needToTurnOnRadio = false;
+        }
+        /*@}*/
+
         if (needToTurnOnRadio) {
             final Uri resultHandle = handle;
             // By default, Connection based on the default Phone, since we need to return to Telecom
@@ -482,8 +534,13 @@ public class TelephonyConnectionService extends ConnectionService {
                         // We should be able to make emergency calls at any time after the radio has
                         // been powered on and isn't in the UNAVAILABLE state, even if it is
                         // reporting the OUT_OF_SERVICE state.
-                        return (phone.getState() == PhoneConstants.State.OFFHOOK)
-                            || phone.getServiceState().getState() != ServiceState.STATE_POWER_OFF;
+                        if (isVoWifiRegistered()) {
+                            Log.i(this, "isOkToCall, vowifi on, waiting for in service or emergency only");
+                            return isCellularNetworkAvailableForECalls(phone, serviceState);
+                        } else {
+                            return (phone.getState() == PhoneConstants.State.OFFHOOK)
+                                    || phone.getServiceState().getState() != ServiceState.STATE_POWER_OFF;
+                        }
                     } else {
                         // Wait until we are in service and ready to make calls. This can happen
                         // when we power down the radio on bluetooth to save power on watches or if
@@ -593,7 +650,8 @@ public class TelephonyConnectionService extends ConnectionService {
             return;
         }
         // Get the right phone object since the radio has been turned on successfully.
-        if (isRadioReady) {
+        //UNISOC： make vowifi ecall when failed to make ecall by cellular network
+        if (isRadioReady || isVoWifiRegistered()) {
             final Phone phone = getPhoneForAccount(request.getAccountHandle(), isEmergencyNumber,
                     /* Note: when not an emergency, handle can be null for unknown callers */
                     handle == null ? null : handle.getSchemeSpecificPart());
@@ -715,6 +773,14 @@ public class TelephonyConnectionService extends ConnectionService {
         // Check both voice & data RAT to enable normal CS call,
         // when voice RAT is OOS but Data RAT is present.
         int state = phone.getServiceState().getState();
+        /*UNISOC: add for vowifi call @{*/
+        boolean mIsImsRegistered = phone.isImsRegistered();
+        if(mIsImsRegistered){
+            state = ServiceState.STATE_IN_SERVICE;
+        }
+        Log.d(this, "onCreateOutgoingConnection mIsImsRegistered:"+mIsImsRegistered);
+        /* @} */
+
         if (state == ServiceState.STATE_OUT_OF_SERVICE) {
             int dataNetType = phone.getServiceState().getDataNetworkType();
             if (dataNetType == TelephonyManager.NETWORK_TYPE_LTE ||
@@ -926,6 +992,12 @@ public class TelephonyConnectionService extends ConnectionService {
         if (connection instanceof TelephonyConnection) {
             TelephonyConnection telephonyConnection = (TelephonyConnection) connection;
             maybeSendInternationalCallEvent(telephonyConnection);
+            // UNISOC: updatePhoneAccount when chosenPhone changed
+            if (mNeedUpdatePhoneAccountHandle != null) {
+                Log.i(this, "onCreateConnectionComplete, setPhoneAccountHandle");
+                ((TelephonyConnection)connection).setPhoneAccountHandle(mNeedUpdatePhoneAccountHandle);
+                mNeedUpdatePhoneAccountHandle = null;
+            }
         }
     }
 
@@ -1228,6 +1300,13 @@ public class TelephonyConnectionService extends ConnectionService {
             TelephonyConnection connection, Phone phone, int videoState, Bundle extras) {
         String number = connection.getAddress().getSchemeSpecificPart();
 
+        // UNISOC: updatePhoneAccount when chosenPhone changed
+        if (mNeedUpdatePhoneAccount) {
+            mNeedUpdatePhoneAccountHandle = PhoneUtils.makePstnPhoneAccountHandle(phone);
+            updatePhoneAccount(connection, phone);
+            mNeedUpdatePhoneAccount = false;
+        }
+
         com.android.internal.telephony.Connection originalConnection = null;
         try {
             if (phone != null) {
@@ -1269,6 +1348,20 @@ public class TelephonyConnectionService extends ConnectionService {
             connection.destroy();
             return;
         }
+
+        /* UNISOC: Add for VoLTE @{ */
+        boolean isConferenceDial = false;
+        if(extras != null){
+            isConferenceDial = extras.getBoolean("android.intent.extra.IMS_CONFERENCE_REQUEST",false);
+            Log.i(this, "placeOutgoingConnection->isConferenceDial:"+isConferenceDial);
+            if(isConferenceDial && originalConnection == null){
+                int telephonyDisconnectCause = android.telephony.DisconnectCause.OUTGOING_CANCELED;
+                connection.setDisconnected(DisconnectCauseUtil.toTelecomDisconnectCause(
+                        telephonyDisconnectCause, "isConferenceDial"));
+                return;
+            }
+        }
+        /* @} */
 
         if (originalConnection == null) {
             int telephonyDisconnectCause = android.telephony.DisconnectCause.OUTGOING_FAILURE;
@@ -1366,6 +1459,8 @@ public class TelephonyConnectionService extends ConnectionService {
             Log.d(this, "getPhoneForAccount: phone for phone acct handle %s is out of service "
                     + "or invalid for emergency call.", accountHandle);
             chosenPhone = getPhoneForEmergencyCall(emergencyNumberAddress);
+            // UNISOC: updatePhoneAccount when chosenPhone changed
+            mNeedUpdatePhoneAccount = true;
             Log.d(this, "getPhoneForAccount: using subId: " +
                     (chosenPhone == null ? "null" : chosenPhone.getSubId()));
         }
@@ -1539,6 +1634,8 @@ public class TelephonyConnectionService extends ConnectionService {
         }
 
         Phone firstPhoneWithSim = null;
+        Phone firstPhoneWithPowerOn = null;
+
         int phoneCount = mTelephonyManagerProxy.getPhoneCount();
         List<SlotStatus> phoneSlotStatus = new ArrayList<>(phoneCount);
         for (int i = 0; i < phoneCount; i++) {
@@ -1566,6 +1663,8 @@ public class TelephonyConnectionService extends ConnectionService {
             // 4)
             // Report Slot's PIN/PUK lock status for sorting later.
             int simState = mSubscriptionManagerProxy.getSimStateForSlotIdx(i);
+            // UNISOC: Record sim state.
+            status.simState = simState;
             if (simState == TelephonyManager.SIM_STATE_PIN_REQUIRED ||
                     simState == TelephonyManager.SIM_STATE_PUK_REQUIRED) {
                 status.isLocked = true;
@@ -1588,6 +1687,15 @@ public class TelephonyConnectionService extends ConnectionService {
                 Log.i(this, "getFirstPhoneForEmergencyCall, SIM card inserted, Phone Id:" +
                         firstPhoneWithSim.getPhoneId());
             }
+            /*UNISOC: The slot is power on, but is not in service,
+             * so keep track of this Phone @{*/
+            if (firstPhoneWithPowerOn == null
+                    && phone.getServiceState().getState() != ServiceState.STATE_POWER_OFF) {
+                firstPhoneWithPowerOn = phone;
+                Log.i(this, "getFirstPhoneForEmergencyCall, radio on, Phone Id:" +
+                        firstPhoneWithPowerOn.getPhoneId());
+            }
+            /*@}*/
         }
         // 7)
         if (firstPhoneWithSim == null && phoneSlotStatus.isEmpty()) {
@@ -1652,6 +1760,22 @@ public class TelephonyConnectionService extends ConnectionService {
                     });
                 }
                 int mostCapablePhoneId = phoneSlotStatus.get(phoneSlotStatus.size() - 1).slotId;
+                // UNISOC: If most Capable Phone is ABSENT, still using first phone with sim.
+                if (firstPhoneWithSim != null
+                        && mostCapablePhoneId != firstPhoneWithSim.getPhoneId()
+                        && phoneSlotStatus.get(phoneSlotStatus.size() - 1).simState == TelephonyManager.SIM_STATE_ABSENT) {
+                    return firstPhoneWithSim;
+                }
+                /*UNISOC: if most capable phone is power off, use first phone with power on @{*/
+                if (firstPhoneWithPowerOn != null
+                        && mPhoneFactoryProxy.getPhone(mostCapablePhoneId) != null
+                        && mPhoneFactoryProxy.getPhone(mostCapablePhoneId).getServiceState().getState()
+                        == ServiceState.STATE_POWER_OFF) {
+                    Log.i(this, "getFirstPhoneForEmergencyCall, Using Phone Id: " + firstPhoneWithPowerOn.getPhoneId()
+                            + " because phone with highest capability is power off");
+                    return firstPhoneWithPowerOn;
+                }
+                /*@}*/
                 Log.i(this, "getFirstPhoneForEmergencyCall, Using Phone Id: " + mostCapablePhoneId +
                         "with highest capability");
                 return mPhoneFactoryProxy.getPhone(mostCapablePhoneId);
@@ -1666,6 +1790,30 @@ public class TelephonyConnectionService extends ConnectionService {
      * Returns true if the state of the Phone is IN_SERVICE or available for emergency calling only.
      */
     private boolean isAvailableForEmergencyCalls(Phone phone) {
+        /*Unisoc:add for bug1009987, cellC try ECall on Vowifi first @{*/
+        boolean isAirplaneModeOn = Settings.Global.getInt(phone.getContext().getContentResolver(),
+                Settings.Global.AIRPLANE_MODE_ON, 0) > 0;
+        if (isAirplaneModeOn && phone.isWifiCallingEnabled()) {
+            CarrierConfigManager cfgManager = (CarrierConfigManager)
+                    phone.getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
+            if (cfgManager != null) {
+                PersistableBundle config = cfgManager.getConfigForSubId(phone.getSubId());
+                if (config != null) {
+                    boolean supportVowifiEcc =
+                            config.getBoolean(CarrierConfigManagerEx.KEY_CARRIER_SUPPORTS_VOWIFI_EMERGENCY_CALL);
+                    Log.i(this,"isAvailableForEmergencyCalls supportVowifiEcc = "+supportVowifiEcc+ " phone = "+phone);
+                    if (supportVowifiEcc) {
+                        boolean direct = config.getBoolean(CarrierConfigManagerEx.KEY_CARRIER_DIAL_ECC_VOWIFI_WHEN_AIRPLANE);
+                        Log.i(this,"isAvailableForEmergencyCalls direct = "+direct+ " imsphone = "+phone.getImsPhone());
+                        if (direct && phone.getImsPhone() != null) {
+                            return ServiceState.STATE_IN_SERVICE == phone.getImsPhone().getServiceState().getState();
+                        }
+                    }
+                }
+
+            }
+        }
+        /*@}*/
         return ServiceState.STATE_IN_SERVICE == phone.getServiceState().getState() ||
                 phone.getServiceState().isEmergencyOnly();
     }
@@ -1810,5 +1958,25 @@ public class TelephonyConnectionService extends ConnectionService {
                 telephonyConnection.setTtyEnabled(isTtyEnabled);
             }
         }
+    }
+
+    private boolean isVoWifiRegistered () {
+        for (Phone phone : PhoneFactory.getPhones()) {
+            if (phone != null && phone.isWifiCallingEnabled()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isCellularNetworkAvailableForECalls(Phone phone, int serviceState) {
+        if (phone == null
+                || phone.getServiceStateTracker() == null
+                || phone.getServiceStateTracker().mSS == null) {
+            return false;
+        }
+        return phone.getState() == PhoneConstants.State.OFFHOOK
+                || ServiceState.STATE_IN_SERVICE == phone.getServiceStateTracker().mSS.getState()
+                || phone.getServiceStateTracker().mSS.isEmergencyOnly();
     }
 }

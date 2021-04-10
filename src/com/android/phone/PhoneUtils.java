@@ -18,6 +18,7 @@ package com.android.phone;
 
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.KeyguardManager;
 import android.app.ProgressDialog;
 import android.content.ComponentName;
 import android.content.Context;
@@ -31,6 +32,7 @@ import android.telecom.PhoneAccountHandle;
 import android.telecom.VideoProfile;
 import android.telephony.CarrierConfigManager;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
 import android.util.Log;
@@ -40,7 +42,17 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
+import android.content.res.Resources;
+import android.media.Ringtone;
+import android.media.AudioManager;
+import android.media.RingtoneManager;
+import android.os.Vibrator;
+import android.provider.Settings;
+import android.text.InputType;
+import android.text.util.Linkify;
+import com.android.phone.UssdCustomizedUtils;
 
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallManager;
@@ -59,6 +71,8 @@ import com.android.phone.settings.SuppServicesUiUtil;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.ArrayList;
+import android.widget.ArrayAdapter;
 
 /**
  * Misc utilities for the Phone app.
@@ -93,6 +107,21 @@ public class PhoneUtils {
     /** USSD information used to aggregate all USSD messages */
     private static AlertDialog sUssdDialog = null;
     private static StringBuilder sUssdMsg = new StringBuilder();
+
+    /* UNISOC: add for ussd customized feature 886786 @{ */
+    private static ConnectionHandler mConnectionHandler;
+    private static final int PHONE_STATE_CHANGED = 200;
+    private static final int EVENT_DISMISS_USSD_DIALOG = 300;
+
+    private static AlertDialog sMmiPreviousAlertDialog = null;
+    private static Ringtone mRingtone = null;
+    private static final int VIBRATE_PATTERN_MAXLEN = 8 * 2 + 1;
+    private static final long[] DEFAULT_VIBRATE_PATTERN = {0, 250, 250, 250};
+    private static boolean mDialogIsHide = false;
+    /* @} */
+
+    // UNISOC: add for bug1075491
+    public static final String IS_STOPPED_ACTIVITY_FLAG = "IS_STOPPED_ACTIVITY_FLAG";
 
     private static final ComponentName PSTN_CONNECTION_SERVICE_COMPONENT =
             new ComponentName("com.android.phone",
@@ -366,7 +395,7 @@ public class PhoneUtils {
      * @param mmiCode MMI result.
      * @param previousAlert a previous alert used in this activity.
      */
-    static void displayMMIComplete(final Phone phone, Context context, final MmiCode mmiCode,
+    public static AlertDialog displayMMIComplete(final Phone phone, Context context, final MmiCode mmiCode,
             Message dismissCallbackMessage,
             AlertDialog previousAlert) {
         final PhoneGlobals app = PhoneGlobals.getInstance();
@@ -375,6 +404,8 @@ public class PhoneUtils {
         MmiCode.State state = mmiCode.getState();
 
         log("displayMMIComplete: state=" + state);
+        // UNISOC : modify by BUG 1109465
+        mMMiPhone = phone;
 
         switch (state) {
             case PENDING:
@@ -421,7 +452,8 @@ public class PhoneUtils {
                 throw new IllegalStateException("Unexpected MmiCode state: " + state);
         }
 
-        if (previousAlert != null) {
+        //UNISOC:fix for bug 1042271
+        if (previousAlert != null && !TextUtils.isEmpty(text)) {
             previousAlert.dismiss();
         }
 
@@ -434,7 +466,13 @@ public class PhoneUtils {
             // set correctly.
             ProgressDialog pd = new ProgressDialog(app, THEME);
             pd.setTitle(title);
-            pd.setMessage(text);
+            //UNISOC:fix for bug 1017547
+            if (UssdCustomizedUtils.getInstance(context).needCustomized()) {
+                View view = UssdCustomizedUtils.getInstance(context).getConvertView(context, text);
+                pd.setView(view);
+            } else {
+                pd.setMessage(text);
+            }
             pd.setCancelable(false);
             pd.setIndeterminate(true);
             pd.getWindow().setType(WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
@@ -442,17 +480,20 @@ public class PhoneUtils {
 
             // display the dialog
             pd.show();
+            mDialogIsHide = false;
 
             // indicate to the Phone app that the progress dialog has
             // been assigned for the PUK unlock / SIM READY process.
             app.setPukEntryProgressDialog(pd);
+            return pd;
 
         } else if ((app.getPUKEntryActivity() != null) && (state == MmiCode.State.FAILED)) {
-            createUssdDialog(app, context, text,
+            AlertDialog alertDialog = createUssdDialog(app, context, text,
                     WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
             // In case of failure to unlock, we'll need to reset the
             // PUK unlock activity, so that the user may try again.
             app.setPukEntryActivity(null);
+            return  alertDialog;
         } else {
             // In case of failure to unlock, we'll need to reset the
             // PUK unlock activity, so that the user may try again.
@@ -463,7 +504,7 @@ public class PhoneUtils {
             // A USSD in a pending state means that it is still
             // interacting with the user.
             if (state != MmiCode.State.PENDING) {
-                createUssdDialog(app, context, text,
+                return createUssdDialog(app, context, text,
                         WindowManager.LayoutParams.TYPE_SYSTEM_ALERT);
             } else {
                 log("displayMMIComplete: USSD code has requested user input. Constructing input "
@@ -497,7 +538,13 @@ public class PhoneUtils {
                 LayoutInflater inflater = (LayoutInflater) contextThemeWrapper.getSystemService(
                         Context.LAYOUT_INFLATER_SERVICE);
                 View dialogView = inflater.inflate(R.layout.dialog_ussd_response, null);
-
+                /* SPRD: add for bug772057 @{ */
+                TextView textMessage = (TextView) dialogView.findViewById(R.id.text_view);
+                if (UssdCustomizedUtils.getInstance(context).needCustomized()) {
+                    textMessage.setAutoLinkMask(Linkify.PHONE_NUMBERS);
+                }
+                textMessage.setText(text);
+                /* @} */
                 // get the input field.
                 final EditText inputText = (EditText) dialogView.findViewById(R.id.input_field);
 
@@ -531,10 +578,10 @@ public class PhoneUtils {
                             }
                         }
                     };
-
+                UssdCustomizedUtils.getInstance(context).setSpan(context, textMessage);
                 // build the dialog
                 final AlertDialog newDialog = new AlertDialog.Builder(contextThemeWrapper)
-                        .setMessage(text)
+                        //.setMessage(text)
                         .setView(dialogView)
                         .setPositiveButton(R.string.send_button, mUSSDDialogListener)
                         .setNegativeButton(R.string.cancel, mUSSDDialogListener)
@@ -560,20 +607,38 @@ public class PhoneUtils {
                     };
                 inputText.setOnKeyListener(mUSSDDialogInputListener);
                 inputText.requestFocus();
+                if (UssdCustomizedUtils.getInstance(context).needCustomized()) {
+                    inputText.setRawInputType(InputType.TYPE_CLASS_NUMBER);
+                }
 
-                // set the window properties of the dialog
-                newDialog.getWindow().setType(
-                        WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+                /*
+                 * set the window properties of the dialog
+                 * newDialog.getWindow().setType(
+                 *      WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+                 */
+                if (isKeyguardLocked()) {
+                    newDialog.getWindow().setType(
+                            WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
+                } else {
+                    newDialog.getWindow().setType(
+                            WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+                }
+                /* @} */
                 newDialog.getWindow().addFlags(
                         WindowManager.LayoutParams.FLAG_DIM_BEHIND);
 
                 // now show the dialog!
                 newDialog.show();
+                mDialogIsHide = false;
+                if (!UssdCustomizedUtils.getInstance(context).needCustomized()) {
+                    notifyIncomingUssd(context);
+                }
 
                 newDialog.getButton(DialogInterface.BUTTON_POSITIVE)
                         .setTextColor(context.getResources().getColor(R.color.dialer_theme_color));
                 newDialog.getButton(DialogInterface.BUTTON_NEGATIVE)
                         .setTextColor(context.getResources().getColor(R.color.dialer_theme_color));
+                return newDialog;
             }
         }
     }
@@ -586,18 +651,23 @@ public class PhoneUtils {
      * @param text This is message's result.
      * @param windowType The new window type. {@link WindowManager.LayoutParams}.
      */
-    public static void createUssdDialog(PhoneGlobals app, Context context, CharSequence text,
+    public static AlertDialog createUssdDialog(PhoneGlobals app, Context context, CharSequence text,
             int windowType) {
         log("displayMMIComplete: MMI code has finished running.");
 
         log("displayMMIComplete: Extended NW displayMMIInitiate (" + text + ")");
         if (text == null || text.length() == 0) {
-            return;
+            return null;
         }
 
         // displaying system alert dialog on the screen instead of
         // using another activity to display the message.  This
         // places the message at the forefront of the UI.
+        //add for unisoc 963682
+        if (sUssdDialog != null) {
+            sUssdDialog.dismiss();
+            sUssdDialog = null;
+        }
 
         if (sUssdDialog == null) {
             sUssdDialog = new AlertDialog.Builder(context, THEME)
@@ -607,11 +677,18 @@ public class PhoneUtils {
                         @Override
                         public void onDismiss(DialogInterface dialog) {
                             sUssdMsg.setLength(0);
+                            Log.d(LOG_TAG, "createUssdDialog onDismiss mDialogIsHide: "+mDialogIsHide);
+                            mDialogIsHide = false;
                         }
                     })
                     .create();
 
-            sUssdDialog.getWindow().setType(windowType);
+            if (isKeyguardLocked()) {
+                sUssdDialog.getWindow().setType(
+                        WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
+            } else {
+                sUssdDialog.getWindow().setType(windowType);
+            }
             sUssdDialog.getWindow().addFlags(
                     WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
@@ -622,8 +699,19 @@ public class PhoneUtils {
                     .insert(0, "\n");
         }
         sUssdMsg.insert(0, text);
-        sUssdDialog.setMessage(sUssdMsg.toString());
+        //UNISOC:fix for bug 1017547
+        if (UssdCustomizedUtils.getInstance(context).needCustomized()) {
+            View view = UssdCustomizedUtils.getInstance(context).getConvertView(context, sUssdMsg);
+            sUssdDialog.setView(view);
+        } else {
+            sUssdDialog.setMessage(sUssdMsg.toString());
+        }
         sUssdDialog.show();
+        mDialogIsHide = false;
+        if (!UssdCustomizedUtils.getInstance(context).needCustomized()) {
+            notifyIncomingUssd(context);
+        }
+        return sUssdDialog;
     }
 
     /**
@@ -1359,4 +1447,196 @@ public class PhoneUtils {
             phone.setRadioPower(enabled);
         }
     }
+
+
+    /* UNISOC: add for ussd customized feature 1072636 @{ */
+    private static class ConnectionHandler extends Handler {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case PHONE_STATE_CHANGED:
+                    onPhoneStateChanged();
+                    break;
+                case EVENT_DISMISS_USSD_DIALOG:
+                    Log.d(LOG_TAG, "EVENT_DISMISS_USSD_DIALOG sMmiPreviousAlertDialog: " + sMmiPreviousAlertDialog);
+                    disMissUssdDialog();
+                    break;
+            }
+        }
+    }
+    public static void initializeConnectionHandler(CallManager cm) {
+        if (mConnectionHandler == null) {
+            mConnectionHandler = new ConnectionHandler();
+        }
+        final PhoneGlobals app = PhoneGlobals.getInstance();
+        if (app != null && UssdCustomizedUtils.getInstance(app).needCustomized()) {
+            cm.registerForPreciseCallStateChanged(mConnectionHandler, PHONE_STATE_CHANGED, cm);
+        }
+    }
+
+    private static void notifyIncomingUssd(Context context) {
+        boolean sound = false;
+        boolean vibrate = false;
+        AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        int ringerMode = audioManager.getRingerMode();
+        if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            sound = true;
+            if (audioManager.getVibrateSetting(AudioManager.VIBRATE_TYPE_RINGER) ==
+                    AudioManager.VIBRATE_SETTING_ON) {
+                vibrate = true;
+            }
+        } else if (ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
+            vibrate = true;
+        }
+        // play notification sound
+        if (sound) {
+            Uri ringtoneUri = null;
+            String uri = Settings.System.getString(context.getContentResolver(),
+                    Settings.System.NOTIFICATION_SOUND);
+            if (uri != null) {
+                ringtoneUri = Uri.parse(uri);
+            }
+            if (mRingtone != null) {
+                mRingtone.stop();
+            }
+            if (ringtoneUri != null) {
+                mRingtone = RingtoneManager.getRingtone(context, ringtoneUri);
+            }
+            if (mRingtone != null) {
+                mRingtone.setStreamType(AudioManager.STREAM_RING);
+                mRingtone.setLooping(false);
+                mRingtone.play();
+            }
+        }
+        // vibrate
+        if (vibrate) {
+            Vibrator vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            long[] pattern = getLongArray(context.getResources(),
+                    com.android.internal.R.array.config_defaultNotificationVibePattern,
+                    VIBRATE_PATTERN_MAXLEN,
+                    DEFAULT_VIBRATE_PATTERN);
+            vibrator.vibrate(pattern, -1);
+        }
+        // wake up screen
+        PhoneGlobals.getInstance().wakeUpScreen();
+    }
+
+    private static boolean isKeyguardLocked() {
+        KeyguardManager keguard = PhoneGlobals.getInstance().getKeyguardManager();
+        return keguard.isKeyguardLocked();
+    }
+
+    private static long[] getLongArray(Resources r, int resid, int maxlen, long[] def) {
+        int[] ar = r.getIntArray(resid);
+        if (ar == null) {
+            return def;
+        }
+        final int len = ar.length > maxlen ? maxlen : ar.length;
+        long[] out = new long[len];
+        for (int i = 0; i < len; i++) {
+            out[i] = ar[i];
+        }
+        return out;
+    }
+
+    public static void onPhoneStateChanged() {
+        final PhoneGlobals app = PhoneGlobals.getInstance();
+        if (app != null) {
+            CallManager cm = app.mCM;
+            PhoneConstants.State state = cm.getState();
+            if (state == PhoneConstants.State.RINGING) {
+                hideUssdDialog();
+            }
+            if (state == PhoneConstants.State.IDLE) {
+                showUssdDialog();
+            }
+        }
+    }
+
+    public static void disMissUssdDialog() {
+        if (sMmiPreviousAlertDialog != null) {
+            sMmiPreviousAlertDialog.dismiss();
+            sMmiPreviousAlertDialog = null;
+            mDialogIsHide = false;
+        }
+        /* UNISOC: Modify for Bug 1111998 @{ */
+        if (PhoneGlobals.getInstance().getMMIDialogActivity() != null) {
+            PhoneGlobals.getInstance().getMMIDialogActivity().finish();
+        }
+        /* @} */
+    }
+
+    public static void handleMMIDialogDismiss(final Phone phone, Context context,
+            final MmiCode mmiCode, Message dismissCallbackMessage, AlertDialog previousAlert) {
+        // UNISOC: add for 1062548
+        /*Common feature:
+        MMI alert dialog can not dismiss due to some reasons,
+        The feature is for that the dialog will dismiss in 90s.
+
+        Add config_dismiss_ussd_dialog_duration in config.xml, if orange version: 180s,else 90s
+        * */
+        int dlgDuration = context.getResources().getInteger(R.integer.config_dismiss_ussd_dialog_duration);
+        log("handleMMIDialogDismiss: dlgDuration = " + dlgDuration);
+
+        //UNISOC: modify for 1023960
+        sMmiPreviousAlertDialog = displayMMIComplete(
+                mmiCode.getPhone(), context, mmiCode, null, sMmiPreviousAlertDialog);
+
+        mConnectionHandler.removeMessages(EVENT_DISMISS_USSD_DIALOG);
+        mConnectionHandler.sendMessageDelayed(
+                mConnectionHandler.obtainMessage(EVENT_DISMISS_USSD_DIALOG),
+                dlgDuration * 1000);
+    }
+
+    private static void hideUssdDialog() {
+        Log.d(LOG_TAG, "hideUssdDialog sMmiPreviousAlertDialog: " + sMmiPreviousAlertDialog);
+        if (sMmiPreviousAlertDialog != null && sMmiPreviousAlertDialog.isShowing()) {
+            sMmiPreviousAlertDialog.hide();
+            mDialogIsHide = true;
+        }
+    }
+
+    private static void showUssdDialog() {
+        Log.d(LOG_TAG, "showUssdDialog sMmiPreviousAlertDialog: " + sMmiPreviousAlertDialog + " mDialogIsHide: " + mDialogIsHide);
+
+        if (sMmiPreviousAlertDialog != null && mDialogIsHide) {
+            sMmiPreviousAlertDialog.show();
+            mDialogIsHide = false;
+        }
+    }
+    /* @} */
+
+    public static boolean isCtCard(Context context, int phoneId) {
+        SubscriptionInfo sir = SubscriptionManager.from(context)
+                .getActiveSubscriptionInfoForSimSlotIndex(phoneId);
+        final String[] ALL_CT_ICCID = {"898603", "898611", "8985302", "8985307"};
+        if (sir != null) {
+            String iccid = sir.getIccId();
+            log("isCtCard iccid = " + iccid);
+            for (String iccidString : ALL_CT_ICCID) {
+                if (iccid != null && iccid.startsWith(iccidString)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return false;
+    }
+    /* UNISOC : modify by BUG 1109465 @{ */
+    private static Phone mMMiPhone = null;
+    public static void dismissUssdDialogForSimAbsent(int phoneId) {
+        if (mMMiPhone == null)
+            return;
+        log("dismissUssdDialogForSimAbsent, mMMiPhone.getPhoneId() = " + mMMiPhone.getPhoneId());
+        if ( phoneId == mMMiPhone.getPhoneId()) {
+            if (sMmiPreviousAlertDialog != null) {
+                if (mConnectionHandler.hasMessages(EVENT_DISMISS_USSD_DIALOG)) {
+                    mConnectionHandler.removeMessages(EVENT_DISMISS_USSD_DIALOG);
+                }
+                mConnectionHandler.sendEmptyMessage(EVENT_DISMISS_USSD_DIALOG);
+            }
+        }
+        mMMiPhone = null;
+    }
+    /* @} */
 }

@@ -27,6 +27,7 @@ import android.os.PersistableBundle;
 import android.preference.Preference;
 import android.preference.PreferenceScreen;
 import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManagerEx;
 import android.telephony.ServiceState;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
@@ -40,6 +41,7 @@ import com.android.internal.telephony.GsmCdmaPhone;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.imsphone.ImsPhone;
 import com.android.phone.settings.fdn.EditPinPreference;
+import com.android.phone.settings.ActivityContainer;
 
 import java.util.ArrayList;
 
@@ -116,6 +118,9 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
 
     private SubscriptionInfoHelper mSubscriptionInfoHelper;
     private Dialog mProgressDialog;
+
+    // UNISOC: modify for Bug 1114454
+    private ActivityContainer mActivityContainer;
 
     @Override
     public void onPinEntered(EditPinPreference preference, boolean positiveResult) {
@@ -359,6 +364,7 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
 
         mSubscriptionInfoHelper = new SubscriptionInfoHelper(this, getIntent());
         mPhone = mSubscriptionInfoHelper.getPhone();
+        initParent(mPhone);
         if (DBG) {
             Log.d(LOG_TAG, "onCreate, reading callbarring_options.xml file finished!");
         }
@@ -373,11 +379,19 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
         }
         boolean isPwChangeButtonVisible = true;
         boolean isDisableAllButtonVisible = true;
+        boolean isEnablePWandDiasbleAllbtn = false;
+        boolean isButtonBAICrVisible = true;
         if (carrierConfig != null) {
             isPwChangeButtonVisible = carrierConfig.getBoolean(
                     CarrierConfigManager.KEY_CALL_BARRING_SUPPORTS_PASSWORD_CHANGE_BOOL, true);
             isDisableAllButtonVisible = carrierConfig.getBoolean(
                     CarrierConfigManager.KEY_CALL_BARRING_SUPPORTS_DEACTIVATE_ALL_BOOL, true);
+            //UNISOC: porting for bug1073294
+            isEnablePWandDiasbleAllbtn = carrierConfig.getBoolean(
+                    CarrierConfigManagerEx.KEY_CARRIER_ENABLE_CB_BA_ALL_AND_PW_SETTINGS, false);
+            //UNISOC:add for bug1223201
+            isButtonBAICrVisible = carrierConfig.getBoolean(
+                    CarrierConfigManagerEx.KEY_SHOW_INCOMING_INTERNATIONAL_ROAMING_BARRING, true);
         } else {
             Log.w(LOG_TAG, "Couldn't access CarrierConfig bundle");
         }
@@ -401,7 +415,9 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
         if (!isPwChangeButtonVisible) {
             prefSet.removePreference(mButtonChangePW);
         }
-
+        if (!isButtonBAICrVisible) {
+            prefSet.removePreference(mButtonBAICr);
+        }
         // Assign click listener and update state
         mButtonBAOC.setOnPinEnteredListener(this);
         mButtonBAOIC.setOnPinEnteredListener(this);
@@ -416,7 +432,9 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
         mPreferences.add(mButtonBAOIC);
         mPreferences.add(mButtonBAOICxH);
         mPreferences.add(mButtonBAIC);
-        mPreferences.add(mButtonBAICr);
+        if (isButtonBAICrVisible) {
+            mPreferences.add(mButtonBAICr);
+        }
 
         // Find out if password is currently used.
         boolean usePassword = true;
@@ -424,11 +442,17 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
 
         ImsPhone imsPhone = mPhone != null ? (ImsPhone) mPhone.getImsPhone() : null;
         if (imsPhone != null
-                && ((imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE)
-                        || imsPhone.isUtEnabled())) {
+                && !isEnablePWandDiasbleAllbtn
+                //UNISOC: Modify for bug#1145363
+                && imsPhone.isUtEnabled()) {
             usePassword = false;
             useDisableaAll = false;
         }
+
+        // UNISOC: modify for Bug 1114454
+        mActivityContainer = ActivityContainer.getInstance();
+        mActivityContainer.setApplication(getApplication());
+        mActivityContainer.addActivity(this, mSubscriptionInfoHelper.getPhone().getPhoneId());
 
         // Find out if the sim card is ready.
         boolean isSimReady = TelephonyManager.from(this).getSimState(
@@ -505,6 +529,15 @@ public class GsmUmtsCallBarringOptions extends TimeConsumingPreferenceActivity
             }
             mFirstResume = false;
             mIcicle = null;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // UNISOC: modify for Bug 1114454
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
         }
     }
 

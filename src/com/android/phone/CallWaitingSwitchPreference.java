@@ -12,6 +12,9 @@ import android.util.Log;
 
 import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.Phone;
+import android.telephony.ServiceState;
+import android.telephony.TelephonyManager;
+import android.os.SystemProperties;
 
 public class CallWaitingSwitchPreference extends SwitchPreference {
     private static final String LOG_TAG = "CallWaitingSwitchPreference";
@@ -20,6 +23,10 @@ public class CallWaitingSwitchPreference extends SwitchPreference {
     private final MyHandler mHandler = new MyHandler();
     private Phone mPhone;
     private TimeConsumingPreferenceListener mTcpListener;
+    // UNISOC: add for bug952191
+    public int mCWArray[];
+    // UNISOC: add for bug821579
+    private static final String CW_PROP = "gsm.ss.call_waiting";
 
     public CallWaitingSwitchPreference(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
@@ -39,6 +46,13 @@ public class CallWaitingSwitchPreference extends SwitchPreference {
         mTcpListener = listener;
 
         if (!skipReading) {
+            /* UNISOC: add for 1050290 @{ */
+            if(mPhone == null){
+                Log.d(LOG_TAG, "init: mPhone is null!");
+                setEnabled(false);
+                return;
+            }
+            /* @} */
             mPhone.getCallWaiting(mHandler.obtainMessage(MyHandler.MESSAGE_GET_CALL_WAITING,
                     MyHandler.MESSAGE_GET_CALL_WAITING, MyHandler.MESSAGE_GET_CALL_WAITING));
             if (mTcpListener != null) {
@@ -84,7 +98,8 @@ public class CallWaitingSwitchPreference extends SwitchPreference {
                     mTcpListener.onFinished(CallWaitingSwitchPreference.this, true);
                 }
             }
-
+            // UNISOC: add for bug952191
+            mCWArray = null;
             if (ar.exception instanceof CommandException) {
                 if (DBG) {
                     Log.d(LOG_TAG, "handleGetCallWaitingResponse: CommandException=" +
@@ -110,12 +125,14 @@ public class CallWaitingSwitchPreference extends SwitchPreference {
                 // If cwArray[0] is = 1, then cwArray[1] must follow,
                 // with the TS 27.007 service class bit vector of services
                 // for which call waiting is enabled.
-                try {
+                /*try {
                     setChecked(((cwArray[0] == 1) && ((cwArray[1] & 0x01) == 0x01)));
                 } catch (ArrayIndexOutOfBoundsException e) {
                     Log.e(LOG_TAG, "handleGetCallWaitingResponse: improper result: err ="
                             + e.getMessage());
-                }
+                }*/
+                // UNISOC: modify for bug952191
+                handleGetCWResult(cwArray);
             }
         }
 
@@ -134,4 +151,24 @@ public class CallWaitingSwitchPreference extends SwitchPreference {
                     MESSAGE_SET_CALL_WAITING, MESSAGE_SET_CALL_WAITING, ar.exception));
         }
     }
+
+    /* UNISOC: add for bug952191 @{ */
+    public void handleGetCWResult(int tmpCwArray[]) {
+        mCWArray = tmpCwArray;
+        // If cwArray[0] is = 1, then cwArray[1] must follow,
+        // with the TS 27.007 service class bit vector of services
+        // for which call waiting is enabled.
+        try {
+            setChecked(((tmpCwArray[0] == 1) && ((tmpCwArray[1] & 0x01) == 0x01)));
+            //isInitFinish = true;
+            /* SPRD: add for bug821579 @{ */
+            Log.d(LOG_TAG, "set CW_PROP " + isChecked());
+            SystemProperties.set(CW_PROP, String.valueOf(isChecked()));
+            /* @} */
+        } catch (ArrayIndexOutOfBoundsException e) {
+            Log.e(LOG_TAG, "handleGetCallWaitingResponse: improper result: err ="
+                    + e.getMessage());
+        }
+    }
+    /* @} */
 }

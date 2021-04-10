@@ -150,6 +150,13 @@ public class ImsConferenceController {
         mTelephonyConnections.add(connection);
         connection.addConnectionListener(mConnectionListener);
         recalculateConference();
+        //UISOC: add for bug993114
+        //Sometimes connection that is active/holding is added, there will be no onStateChanged
+        //for this connection,so recalculateConferenceable here.
+        if (connection.getState() == Connection.STATE_ACTIVE
+                || connection.getState() == Connection.STATE_HOLDING) {
+            recalculateConferenceable();
+        }
     }
 
     /**
@@ -328,10 +335,22 @@ public class ImsConferenceController {
         Iterator<TelephonyConnection> it = mTelephonyConnections.iterator();
         while (it.hasNext()) {
             TelephonyConnection connection = it.next();
+            // UNISOC: Ims conference calllog time & type refactor.
+            if (connection.isImsConnection() && connection.getOriginalConnection() != null) {
+                connection.setIndex(connection.getOriginalConnection().getIndex());
+            }
             if (connection.isImsConnection() && connection.getOriginalConnection() != null &&
                     connection.getOriginalConnection().isMultiparty()) {
-
-                startConference(connection);
+                /* UNISOC: Ims conference calllog time & type refactor. @{ */
+                ArrayList<TelephonyConnection> memberConnections = new ArrayList<>();
+                for (TelephonyConnection telephonyConnection : mTelephonyConnections) {
+                    if (telephonyConnection != null && telephonyConnection.isImsConnection()) {
+                        memberConnections.add(telephonyConnection);
+                    }
+                }
+                startConference(connection, memberConnections);
+                //startConference(connection);
+                /* @} */
                 it.remove();
             }
         }
@@ -351,7 +370,8 @@ public class ImsConferenceController {
      *
      * @param connection The connection to the Ims server.
      */
-    private void startConference(TelephonyConnection connection) {
+    private void startConference(TelephonyConnection connection,
+            ArrayList<TelephonyConnection> memberConnections) {
         if (Log.VERBOSE) {
             Log.v(this, "Start new ImsConference - connection: %s", connection);
         }
@@ -376,8 +396,9 @@ public class ImsConferenceController {
                     PhoneUtils.makePstnPhoneAccountHandle(imsPhone.getDefaultPhone());
         }
 
+        // UNISOC: Ims conference calllog time & type refactor.
         ImsConference conference = new ImsConference(mTelecomAccountRegistry, mConnectionService,
-                conferenceHostConnection, phoneAccountHandle, mFeatureFlagProxy);
+                conferenceHostConnection, phoneAccountHandle, mFeatureFlagProxy, memberConnections);
         conference.setState(conferenceHostConnection.getState());
         conference.addListener(mConferenceListener);
         conference.updateConferenceParticipantsAfterCreation();
@@ -389,7 +410,8 @@ public class ImsConferenceController {
         // disconnect tone is not played.
         connection.removeConnectionListener(mConnectionListener);
         connection.clearOriginalConnection();
-        connection.setDisconnected(new DisconnectCause(DisconnectCause.OTHER,
+        connection.setDisconnected(new DisconnectCause(
+                DisconnectCause.OTHER,
                 android.telephony.DisconnectCause.toString(
                         android.telephony.DisconnectCause.IMS_MERGED_SUCCESSFULLY)));
         connection.destroy();

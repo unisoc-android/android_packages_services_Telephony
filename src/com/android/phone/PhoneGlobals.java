@@ -40,6 +40,7 @@ import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.os.UpdateLock;
 import android.os.UserManager;
+import android.os.UserHandle;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.telecom.TelecomManager;
@@ -122,7 +123,8 @@ public class PhoneGlobals extends ContextWrapper {
 
     public static final int AIRPLANE_ON = 1;
     public static final int AIRPLANE_OFF = 0;
-
+    // UNISOC : modify by BUG 1110574
+    public static final String MODIFY_PIN2_MMI_CODE = "**05";
     /**
      * Allowable values for the wake lock code.
      *   SLEEP means the device can be put to sleep.
@@ -303,6 +305,9 @@ public class PhoneGlobals extends ContextWrapper {
                 mCM.registerPhone(phone);
             }
 
+            // UNISOC: add for Bug1118484
+            ImsStateListener.ImsStateListenerCreator(this, PhoneFactory.getPhones());
+
             // Create the NotificationMgr singleton, which is used to display
             // status bar icons and control other status bar behavior.
             notificationMgr = NotificationMgr.init(this);
@@ -345,7 +350,8 @@ public class PhoneGlobals extends ContextWrapper {
             // in.)
             notifier = CallNotifier.init(this);
 
-            PhoneUtils.registerIccStatus(mHandler, EVENT_SIM_NETWORK_LOCKED);
+//            PhoneUtils.registerIccStatus(mHandler, EVENT_SIM_NETWORK_LOCKED);
+            PhoneUtils.initializeConnectionHandler(mCM);
 
             // register for MMI/USSD
             mCM.registerForMmiComplete(mHandler, MMI_COMPLETE, null);
@@ -359,6 +365,8 @@ public class PhoneGlobals extends ContextWrapper {
             intentFilter.addAction(TelephonyIntents.ACTION_EMERGENCY_CALLBACK_MODE_CHANGED);
             intentFilter.addAction(TelephonyIntents.ACTION_DEFAULT_DATA_SUBSCRIPTION_CHANGED);
             intentFilter.addAction(CarrierConfigManager.ACTION_CARRIER_CONFIG_CHANGED);
+            // UNISOC: Bug 976997
+            intentFilter.addAction(Intent.ACTION_USER_SWITCHED);
             registerReceiver(mReceiver, intentFilter);
 
             IntentFilter sipIntentFilter = new IntentFilter(Intent.ACTION_BOOT_COMPLETED);
@@ -483,6 +491,27 @@ public class PhoneGlobals extends ContextWrapper {
         mPUKEntryProgressDialog = dialog;
     }
 
+    /* UNISOC: Modify for Bug 1111998 @{ */
+    /*
+     * when user sends MMI, there is a progress dialog from PhoneUtils.displayMMIInitiate
+     * then cp returns mmicode, popup a alert dialog from PhoneUtils.displayMMIComplete.
+     * case 1. if mmicode state is not pending, the progress dialog will be dismissed;
+     * case 2. if mmicode state is pending, it requests user input, the progress dialog will be not dismissed;
+     *
+     * For case 2, if dismiss the alert dialog when 90s timeout, the progress dialog will be still running.
+     * Solution: dismiss the progress dialog when dismiss the alert dialog
+     * */
+    private Activity mMMIDialogActivity;
+
+    void setMMIDialogActivity(Activity activity) {
+        mMMIDialogActivity = activity;
+    }
+
+    Activity getMMIDialogActivity() {
+        return mMMIDialogActivity;
+    }
+    /* @} */
+
     /**
      * If we are not currently keeping the screen on, then poke the power
      * manager to wake up the screen for the user activity timeout duration.
@@ -503,7 +532,16 @@ public class PhoneGlobals extends ContextWrapper {
     private void onMMIComplete(AsyncResult r) {
         if (VDBG) Log.d(LOG_TAG, "onMMIComplete()...");
         MmiCode mmiCode = (MmiCode) r.result;
-        PhoneUtils.displayMMIComplete(mmiCode.getPhone(), getInstance(), mmiCode, null, null);
+        //PhoneUtils.displayMMIComplete(mmiCode.getPhone(), getInstance(), mmiCode, null, null);
+        /* UNISOC : modify by BUG 1110574 @{ */
+        if (mmiCode.getDialString() != null && mmiCode.getDialString()
+                .startsWith(MODIFY_PIN2_MMI_CODE)) {
+            mPUKEntryActivity = null;
+        }
+        /* @} */
+        // UNISOC: add for ussd customized feature 1072636
+        UssdCustomizedUtils.getInstance(getInstance()).handleMMIDialogDismiss(
+                mmiCode.getPhone(), getInstance(), mmiCode, null, null);
     }
 
     private void initForNewRadioTechnology() {
@@ -603,17 +641,25 @@ public class PhoneGlobals extends ContextWrapper {
                 // re-register as it may be a new IccCard
                 int phoneId = intent.getIntExtra(PhoneConstants.PHONE_KEY,
                         SubscriptionManager.INVALID_PHONE_INDEX);
+                /* UNISOC : modify by BUG 1109465 @{ */
+                String state = intent.getStringExtra(IccCardConstants.INTENT_KEY_ICC_STATE);
+                Log.d(LOG_TAG, "state : " + state + ", phoneId = " + phoneId);
                 if (SubscriptionManager.isValidPhoneId(phoneId)) {
-                    PhoneUtils.unregisterIccStatus(mHandler, phoneId);
-                    PhoneUtils.registerIccStatus(mHandler, EVENT_SIM_NETWORK_LOCKED, phoneId);
+                    if ((IccCardConstants.INTENT_VALUE_ICC_ABSENT).equals(state)) {
+                        PhoneUtils.dismissUssdDialogForSimAbsent(phoneId);
+                    }
                 }
+                /* @} */
+//                if (SubscriptionManager.isValidPhoneId(phoneId)) {
+//                    PhoneUtils.unregisterIccStatus(mHandler, phoneId);
+//                    PhoneUtils.registerIccStatus(mHandler, EVENT_SIM_NETWORK_LOCKED, phoneId);
+//                }
                 if (mPUKEntryActivity != null) {
                     // if an attempt to un-PUK-lock the device was made, while we're
                     // receiving this state change notification, notify the handler.
                     // NOTE: This is ONLY triggered if an attempt to un-PUK-lock has
                     // been attempted.
-                    mHandler.sendMessage(mHandler.obtainMessage(EVENT_SIM_STATE_CHANGED,
-                            intent.getStringExtra(IccCardConstants.INTENT_KEY_ICC_STATE)));
+                    mHandler.sendMessage(mHandler.obtainMessage(EVENT_SIM_STATE_CHANGED,state));
                 }
             } else if (action.equals(TelephonyIntents.ACTION_RADIO_TECHNOLOGY_CHANGED)) {
                 String newPhone = intent.getStringExtra(PhoneConstants.PHONE_NAME_KEY);
@@ -658,6 +704,10 @@ public class PhoneGlobals extends ContextWrapper {
                 if (phone != null) {
                     updateDataRoamingStatus();
                 }
+                /* UNISOC: Bug 976997 @{*/
+            } else if (action.equals(Intent.ACTION_USER_SWITCHED)) {
+                Log.d(LOG_TAG, "user switched");
+                handleUserSwitched(intent);
             }
         }
     }
@@ -702,6 +752,12 @@ public class PhoneGlobals extends ContextWrapper {
             ServiceState ss = ServiceState.newFromBundle(extras);
             if (ss != null) {
                 int state = ss.getState();
+                /*UNISOC: Bug 992528 Consider dataRegState if voiceRegState is out of service @{*/
+                int dataRegState = ss.getDataRegState();
+                if (state == ServiceState.STATE_OUT_OF_SERVICE){
+                    state = dataRegState;
+                }
+                /* @} */
                 int subId = intent.getIntExtra(PhoneConstants.SUBSCRIPTION_KEY,
                         SubscriptionManager.INVALID_SUBSCRIPTION_ID);
                 notificationMgr.updateNetworkSelection(state, subId);
@@ -727,9 +783,13 @@ public class PhoneGlobals extends ContextWrapper {
         Phone phone = getPhone(mDefaultDataSubId);
         if (phone == null) {
             Log.w(LOG_TAG, "Can't get phone with sub id = " + mDefaultDataSubId);
+            if (mNoDataDueToRoaming){
+                mNoDataDueToRoaming = false;
+                Log.d(LOG_TAG, "Dismiss roaming disconnected notification");
+                mHandler.sendEmptyMessage(EVENT_DATA_ROAMING_OK);
+            }
             return;
         }
-
         DataConnectionReasons reasons = new DataConnectionReasons();
         boolean dataAllowed = phone.isDataAllowed(ApnSetting.TYPE_DEFAULT, reasons);
         mDataRoamingNotifLog.log("dataAllowed=" + dataAllowed + ", reasons=" + reasons);
@@ -781,6 +841,15 @@ public class PhoneGlobals extends ContextWrapper {
             Log.w(LOG_TAG, "onNetworkSelectionChanged on null phone, subId: " + subId);
         }
     }
+
+    /** UNISOC: Bug 976997 Force cancel the network selection notification if it's not needed. @{*/
+    private void handleUserSwitched(Intent intent){
+        int userHandleId = intent.getIntExtra(Intent.EXTRA_USER_HANDLE, UserHandle.USER_ALL);
+        if (userHandleId != UserHandle.USER_OWNER){
+            notificationMgr.forceCancelNetworkSelection();
+        }
+    }
+    /** @}*/
 
     /**
      * Dump the state of the object, add calls to other objects as desired.

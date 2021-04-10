@@ -612,8 +612,7 @@ public class CallNotifier extends Handler {
             if (!mPhoneStateListeners.containsKey(subId)) {
                 CallNotifierPhoneStateListener listener = new CallNotifierPhoneStateListener();
                 mTelephonyManager.createForSubscriptionId(subId).listen(listener,
-                        PhoneStateListener.LISTEN_MESSAGE_WAITING_INDICATOR
-                        | PhoneStateListener.LISTEN_CALL_FORWARDING_INDICATOR);
+                        PhoneStateListener.LISTEN_MESSAGE_WAITING_INDICATOR);
                 mPhoneStateListeners.put(subId, listener);
             }
         }
@@ -714,6 +713,10 @@ public class CallNotifier extends Handler {
             // and stop any previous SignalInfo tone which is being played
             stopSignalInfoTone();
         } else {
+            if (!mCM.hasActiveFgCall() && !mCM.hasActiveBgCall()) {
+                if (DBG) log("onSignalInfo: there is no call, return.");
+                return;
+            }
             // Extract the SignalInfo String from the message
             CdmaSignalInfoRec signalInfoRec = (CdmaSignalInfoRec)(r.result);
             // Only proceed if a Signal info is present.

@@ -17,9 +17,12 @@
 package com.android.phone.settings.fdn;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.method.DigitsKeyListener;
@@ -31,9 +34,11 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.android.phone.PhoneGlobals;
 import com.android.phone.R;
+import com.android.phone.settings.ActivityContainer;
 
 /**
  * Pin2 entry screen.
@@ -43,22 +48,62 @@ public class GetPin2Screen extends Activity implements TextView.OnEditorActionLi
 
     private EditText mPin2Field;
     private Button mOkButton;
+    /* SPRD: function FDN support. @{ */
+    private TextView mTextView;
+    /* }@ */
+    /* SPRD: add for bug645817 @{ */
+    private ActivityContainer mActivityContainer;
+    private static final String PHONE_ID = "phone_id";
+    private static final int NO_VALID_PHONE_ID = -1;
+    /* @} */
 
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
         setContentView(R.layout.get_pin2_screen);
-
+        /* SPRD: function FDN support. @{ */
+        Intent intent = getIntent();
+        int times = intent.getIntExtra("times", 0);
+        log("remain times:" + times);
+        if (times > 0) {
+            mTextView = (TextView) findViewById(R.id.prompt);
+            CharSequence nstr = getString(R.string.promptWordOne) +
+                    times + getString(R.string.promptWordTwo);
+            mTextView.setText(nstr);
+        }
+        /* }@ */
         mPin2Field = (EditText) findViewById(R.id.pin);
         mPin2Field.setKeyListener(DigitsKeyListener.getInstance());
+        // SPRD: add for bug 602973
+        mPin2Field.setFilters(new InputFilter[]{new InputFilter.LengthFilter(8)});
+
+        /* SPRD: delete for function FDN support. @{
+        ** ORIGIN
         mPin2Field.setMovementMethod(null);
+        **/
+
         mPin2Field.setOnEditorActionListener(this);
         mPin2Field.setInputType(
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        /* UNISOC: add for bug1149377 @{ */
+        mPin2Field.setTextDirection(View.TEXT_DIRECTION_LTR);
+        mPin2Field.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        /* @} */
+        /* UNISOC: add for bug908006 @{ */
+        mPin2Field.setFocusable(true);
+        mPin2Field.setFocusableInTouchMode(true);
+        mPin2Field.requestFocus();
+        /* }@ */
 
         mOkButton = (Button) findViewById(R.id.ok);
         mOkButton.setOnClickListener(mClicked);
+        /* SPRD: add for bug645817 @{ */
+        int phoneId = intent.getIntExtra(PHONE_ID, NO_VALID_PHONE_ID);
+        mActivityContainer = ActivityContainer.getInstance();
+        mActivityContainer.setApplication(getApplication());
+        mActivityContainer.addActivity(this, phoneId);
+        /* @} */
     }
 
     @Override
@@ -99,6 +144,13 @@ public class GetPin2Screen extends Activity implements TextView.OnEditorActionLi
     private final View.OnClickListener mClicked = new View.OnClickListener() {
         @Override
         public void onClick(View v) {
+            /* SPRD: function FDN support. @{ */
+            if (isAirplaneModeOn(getBaseContext())) {
+                Toast.makeText(GetPin2Screen.this,
+                        R.string.airplane_changed_on, Toast.LENGTH_LONG).show();
+                return;
+            }
+            /* }@ */
             if (TextUtils.isEmpty(mPin2Field.getText())) {
                 return;
             }
@@ -106,6 +158,24 @@ public class GetPin2Screen extends Activity implements TextView.OnEditorActionLi
             returnResult();
         }
     };
+
+    private boolean isAirplaneModeOn(Context context) {
+        if (context == null) {
+            return true;
+        }
+        return Settings.System.getInt(context.getContentResolver(),
+                Settings.System.AIRPLANE_MODE_ON, 0) != 0;
+    }
+
+
+    /* SPRD: add for bug645817 @{ */
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
+    }
+    /* @} */
 
     private void log(String msg) {
         Log.d(LOG_TAG, "[GetPin2] " + msg);

@@ -149,6 +149,7 @@ import com.android.internal.telephony.emergency.EmergencyNumberTracker;
 import com.android.internal.telephony.euicc.EuiccConnector;
 import com.android.internal.telephony.ims.ImsResolver;
 import com.android.internal.telephony.metrics.TelephonyMetrics;
+import com.android.internal.telephony.TeleUtils;
 import com.android.internal.telephony.uicc.IccIoResult;
 import com.android.internal.telephony.uicc.IccUtils;
 import com.android.internal.telephony.uicc.SIMRecords;
@@ -1539,6 +1540,12 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
                                                 ((CommandException)(ar.exception)).getCommandError()
                                                 == CommandException.Error.PASSWORD_INCORRECT) {
                                             mResult = PhoneConstants.PIN_PASSWORD_INCORRECT;
+                                        }  //When UiccCardApp dispose,handle message and return exception
+                                        else if (ar.exception instanceof CommandException &&
+                                                ((CommandException) (ar.exception)).getCommandError()
+                                                        == CommandException.Error.UICC_CARD_APPLICATION_DISPOSED) {
+                                            int PIN_UICC_DISPOSS_FAILURE = 3;
+                                            mResult = PIN_UICC_DISPOSS_FAILURE;
                                         } else {
                                             mResult = PhoneConstants.PIN_GENERAL_FAILURE;
                                         }
@@ -4634,6 +4641,11 @@ public class PhoneInterfaceManager extends ITelephony.Stub {
             if (phone != null) {
                 if (DBG) log("setUserDataEnabled: subId=" + subId + " enable=" + enable);
                 phone.getDataEnabledSettings().setUserDataEnabled(enable);
+                //UNISOC:Fix bug 1096892,the data sub's master switch should be consistent with the data sub's switch.
+                if (subId == SubscriptionManager.getDefaultDataSubscriptionId()) {
+                    Settings.Global.putInt(phone.getContext().getContentResolver(),
+                            Settings.Global.MOBILE_DATA + SubscriptionManager.MAX_SUBSCRIPTION_ID_VALUE, enable ? 1 : 0);
+                }
             } else {
                 loge("setUserDataEnabled: no phone found. Invalid subId=" + subId);
             }

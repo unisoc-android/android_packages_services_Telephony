@@ -32,6 +32,10 @@ import com.android.phone.SubscriptionInfoHelper;
 import com.android.services.telephony.sip.SipAccountRegistry;
 import com.android.services.telephony.sip.SipPreferences;
 import com.android.services.telephony.sip.SipUtil;
+import com.android.internal.telephony.TelephonyIntents;
+import com.android.internal.telephony.IccCardConstants;
+
+import android.preference.PreferenceScreen;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +43,9 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import com.android.settingslib.WirelessUtils;
 
 public class PhoneAccountSettingsFragment extends PreferenceFragment
         implements Preference.OnPreferenceChangeListener,
@@ -62,6 +69,8 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
 
     private static final String LEGACY_ACTION_CONFIGURE_PHONE_ACCOUNT =
             "android.telecom.action.CONNECTION_SERVICE_CONFIGURE";
+    // SPRD: modify for bug 1109918
+    private static final String NO_AVAILABLE_PHONE_ACCOUNT = "no_available_phone_account";
 
     /**
      * Value to start ordering of phone accounts relative to other preferences. By setting this
@@ -88,6 +97,10 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
     private ListPreference mUseSipCalling;
     private SwitchPreference mSipReceiveCallsPreference;
     private SipPreferences mSipPreferences;
+    // SPRD: modify for bug 1109918
+    private Preference mNoAccounts;
+    // UNISOC: add for bug 1127848
+    private Context mContext;
 
     private final SubscriptionManager.OnSubscriptionsChangedListener
             mOnSubscriptionsChangeListener =
@@ -95,6 +108,7 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
         @Override
         public void onSubscriptionsChanged() {
             updateAccounts();
+            updateMakeCallsOptions();
         }
     };
 
@@ -105,17 +119,14 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
         mTelecomManager = TelecomManager.from(getActivity());
         mTelephonyManager = TelephonyManager.from(getActivity());
         mSubscriptionManager = SubscriptionManager.from(getActivity());
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
 
         if (getPreferenceScreen() != null) {
             getPreferenceScreen().removeAll();
         }
 
         addPreferencesFromResource(R.xml.phone_account_settings);
+        // UNISOC: add for bug 1127848
+        mContext = getActivity();
 
         /**
          * Here we make decisions about what we will and will not display with regards to phone-
@@ -151,9 +162,20 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
         mMakeAndReceiveCallsCategory = (PreferenceCategory) getPreferenceScreen().findPreference(
                 MAKE_AND_RECEIVE_CALLS_CATEGORY_KEY);
         mMakeAndReceiveCallsCategoryPresent = false;
+        // UNISOC: add for bug 1109918
+        mNoAccounts = getPreferenceScreen().findPreference(NO_AVAILABLE_PHONE_ACCOUNT);
 
         updateAccounts();
         updateMakeCallsOptions();
+
+        /* UNISOC: add for bug 1127848 @{ */
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+        intentFilter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
+        if (mContext != null) {
+            mContext.registerReceiver(mReceiver,intentFilter);
+        }
+        /* @} */
 
         if (isPrimaryUser() && SipUtil.isVoipSupported(getActivity())) {
             mSipPreferences = new SipPreferences(getActivity());
@@ -187,9 +209,17 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
             getPreferenceScreen().removePreference(
                     getPreferenceScreen().findPreference(SIP_SETTINGS_CATEGORY_PREF_KEY));
         }
+    }
 
+    @Override
+    public void onResume() {
+        super.onResume();
         SubscriptionManager.from(getActivity()).addOnSubscriptionsChangedListener(
                 mOnSubscriptionsChangeListener);
+        /* UNISOC: add for bug 1141013 @{ */
+        updateAccounts();
+        updateMakeCallsOptions();
+        /* @} */
     }
 
     @Override
@@ -198,6 +228,17 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
                 mOnSubscriptionsChangeListener);
         super.onPause();
     }
+
+    /* UNISOC: add for bug 1179966 @{ */
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        // UNISOC: add for bug 1127848
+        if (mContext != null) {
+            mContext.unregisterReceiver(mReceiver);
+        }
+    }
+    /* @} */
 
     /**
      * Handles changes to the preferences.
@@ -283,6 +324,8 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
                 getCallingAccounts(true /* includeSims */, false /* includeDisabled */),
                 mTelecomManager.getUserSelectedOutgoingPhoneAccount(),
                 getString(R.string.phone_accounts_ask_every_time));
+        // UNISOC: add for bug 1127848
+        updateDefaultOutgoingAccount();
     }
 
     private void initAccountList(List<PhoneAccountHandle> enabledAccounts) {
@@ -419,12 +462,23 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
 
                 // Only show the 'Make Calls With..." option if there are multiple accounts.
                 if (enabledAccounts.size() > 1) {
+                    //UNISOC: modify by bug1119635
+                    if (getPreferenceScreen()
+                            .findPreference(MAKE_AND_RECEIVE_CALLS_CATEGORY_KEY) == null) {
+                        getPreferenceScreen().addPreference(mMakeAndReceiveCallsCategory);
+                    }
+
                     mMakeAndReceiveCallsCategory.addPreference(mDefaultOutgoingAccount);
                     mMakeAndReceiveCallsCategoryPresent = true;
                     mDefaultOutgoingAccount.setListener(this);
                     updateDefaultOutgoingAccountsModel();
                 } else {
+                    //UNISOC: add for bug1139268
+                    if(mDefaultOutgoingAccount.getDialog()!= null && mDefaultOutgoingAccount.getDialog().isShowing()) {
+                        mDefaultOutgoingAccount.getDialog().dismiss();
+                    }
                     mMakeAndReceiveCallsCategory.removePreference(mDefaultOutgoingAccount);
+                    mMakeAndReceiveCallsCategoryPresent = false;
                 }
 
                 // If there are no third party (nonSim) accounts,
@@ -434,6 +488,13 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
                 } else {
                     mAccountList.removePreference(mAllCallingAccounts);
                 }
+                /* UNISOC: add by bug 1109918 @{ */
+                if (enabledAccounts.size() > 0) {
+                    mAccountList.removePreference(mNoAccounts);
+                } else {
+                    mAccountList.addPreference(mNoAccounts);
+                }
+                /* @} */
             } else {
                 getPreferenceScreen().removePreference(mAccountList);
             }
@@ -533,8 +594,13 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
                     .setIntent(smartForwardingUiIntent);
             mMakeAndReceiveCallsCategoryPresent = true;
         } else {
-            mMakeAndReceiveCallsCategory.removePreference(
-                    getPreferenceScreen().findPreference(SMART_FORWARDING_CONFIGURATION_PREF_KEY));
+            //UNISOC: modify by bug1119635
+            PreferenceScreen smartForwardindg = (PreferenceScreen) mMakeAndReceiveCallsCategory
+                    .findPreference(SMART_FORWARDING_CONFIGURATION_PREF_KEY);
+            if (smartForwardindg != null) {
+                mMakeAndReceiveCallsCategory.removePreference(
+                        smartForwardindg);
+            }
         }
 
         if (!mMakeAndReceiveCallsCategoryPresent) {
@@ -546,7 +612,7 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
      * @return Smart forwarding configuration UI Intent when supported
      */
     private Intent getLaunchSmartForwardingMenuIntent() {
-        if (mTelephonyManager.getPhoneCount() <= 1) {
+        if (mTelephonyManager.getPhoneCount() <= 1 || getActivity() == null) {
             return null;
         }
 
@@ -596,4 +662,40 @@ public class PhoneAccountSettingsFragment extends PreferenceFragment
 
         return intent;
     }
+
+    /* UNISOC: add for bug 1127848 @{ */
+    private BroadcastReceiver mReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (Intent.ACTION_AIRPLANE_MODE_CHANGED.equals(action)) {
+                updateDefaultOutgoingAccount();
+            }
+            /* UNISOC: add for bug 1179966 @{ */
+            else if (TelephonyIntents.ACTION_SIM_STATE_CHANGED.equals(action)) {
+                String stateExtra = intent.getStringExtra(IccCardConstants.INTENT_KEY_ICC_STATE);
+                if (IccCardConstants.INTENT_VALUE_ICC_ABSENT.equals(stateExtra)) {
+                    if(mDefaultOutgoingAccount != null && mDefaultOutgoingAccount.getDialog()!= null
+                            && mDefaultOutgoingAccount.getDialog().isShowing()) {
+                        mDefaultOutgoingAccount.getDialog().dismiss();
+                    }
+                }
+            }
+            /* @} */
+        }
+    };
+
+    private void updateDefaultOutgoingAccount() {
+        if (mContext == null){
+            Log.d(LOG_TAG, "mContext == null!");
+            return;
+        }
+
+        if (WirelessUtils.isAirplaneModeOn(mContext)) {
+            mDefaultOutgoingAccount.setEnabled(false);
+        } else {
+            mDefaultOutgoingAccount.setEnabled(true);
+        }
+    }
+    /* @} */
 }

@@ -14,7 +14,7 @@ import android.util.Log;
 import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.Phone;
-
+import android.os.SystemProperties;
 /**
  * {@link ListPreference} for CLIR (Calling Line Identification Restriction).
  * Right now this is used for "Caller ID" setting.
@@ -34,6 +34,9 @@ public class CLIRListPreference extends ListPreference {
     private boolean mConfigSupportNetworkDefault;
 
     int clirArray[];
+    // UNISOC: add for bug1051206
+    private static final String CLIR_PROP = "gsm.ss.clir";
+    private String mClirValue = String.valueOf(CommandsInterface.CLIR_DEFAULT);
 
     public CLIRListPreference(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -46,7 +49,7 @@ public class CLIRListPreference extends ListPreference {
     @Override
     protected void onDialogClosed(boolean positiveResult) {
         super.onDialogClosed(positiveResult);
-
+        mClirValue = String.valueOf(findIndexOfValue(getValue()));//UNISOC: modify for bug1051206
         mPhone.setOutgoingCallerIdDisplay(convertValueToCLIRMode(getValue()),
                 mHandler.obtainMessage(MyHandler.MESSAGE_SET_CLIR));
         if (mTcpListener != null) {
@@ -57,6 +60,13 @@ public class CLIRListPreference extends ListPreference {
     /* package */ void init(
             TimeConsumingPreferenceListener listener, boolean skipReading, Phone phone) {
         mPhone = phone;
+        /* UNISOC: add for 1158498 @{ */
+        if(mPhone == null){
+            Log.i(LOG_TAG, "init: mPhone is null!");
+            setEnabled(false);
+            return;
+        }
+        /* @} */
         mTcpListener = listener;
         mConfigSupportNetworkDefault = PhoneGlobals.getInstance()
                 .getCarrierConfigForSubId(mPhone.getSubId())
@@ -131,6 +141,10 @@ public class CLIRListPreference extends ListPreference {
                 break;
         }
         setSummary(summary);
+        /* UNISOC: add for bug821579 @{ */
+        Log.d(LOG_TAG, "set CLIR_PROP " + String.valueOf(value));
+        SystemProperties.set(CLIR_PROP, String.valueOf(value));
+        /* @} */
     }
 
     /**
@@ -202,6 +216,8 @@ public class CLIRListPreference extends ListPreference {
             if (ar.exception != null) {
                 if (DBG) Log.d(LOG_TAG, "handleSetCallWaitingResponse: ar.exception="+ar.exception);
                 //setEnabled(false);
+            }else {
+                SystemProperties.set(CLIR_PROP, mClirValue);//UNISOC: modify for bug1051206
             }
             if (DBG) Log.d(LOG_TAG, "handleSetCallWaitingResponse: re get");
 

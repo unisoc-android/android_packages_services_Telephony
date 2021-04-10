@@ -21,7 +21,9 @@
         android:sharedUserId="android.uid.phone"
         android:sharedUserLabel="@string/phoneAppLabel"
 >
-
+    <!--: to pass lint -->
+    <uses-sdk android:minSdkVersion="24"/>
+    <!--: @}-->
     <original-package android:name="com.android.phone" />
 
     <protected-broadcast android:name="android.telecom.action.TTY_PREFERRED_MODE_CHANGED" />
@@ -92,6 +94,9 @@
     <protected-broadcast android:name= "android.telephony.action.NETWORK_COUNTRY_CHANGED" />
     <protected-broadcast android:name= "android.telephony.action.PRIMARY_SUBSCRIPTION_LIST_CHANGED" />
 
+    <!-- UNISOC: Add for VSIM -->
+    <protected-broadcast android:name="android.intent.action.NW_ERROR_CODE" />
+    <protected-broadcast android:name="android.intent.action.INCREMENTAL_NW_SCAN_IND" />
     <!-- For Vendor Debugging in Telephony -->
     <protected-broadcast android:name="android.telephony.action.ANOMALY_REPORTED" />
 
@@ -199,6 +204,8 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
     <uses-permission android:name="android.permission.READ_PRECISE_PHONE_STATE" />
     <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS" />
+    <!-- SPRD: add for video call -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <application android:name="PhoneApp"
             android:persistent="true"
@@ -222,7 +229,8 @@
             android:label="@string/emergencyDialerIconLabel"
             android:theme="@style/EmergencyDialerTheme"
             android:screenOrientation="portrait"
-            android:resizeableActivity="false">
+            android:resizeableActivity="false"
+            android:showWhenLocked="true">
             <intent-filter>
                 <action android:name="com.android.phone.EmergencyDialer.DIAL" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -311,7 +319,41 @@
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>
         </activity>
+        <!--  UNISOC: UNISOC: porting for bug1071416 @{ -->
+        <activity
+            android:name="GsmUmtsVideoCallForwardOptions"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|keyboardHidden"
+            android:label="@string/labelCF"
+            android:theme="@style/DialerSettingsLight">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
 
+        <activity
+            android:name="GsmUmtsAllCallForwardOptions"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|keyboardHidden"
+            android:label="@string/labelCF"
+            android:theme="@style/DisablePreviewDialerSettingsLight">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+        <!-- @} -->
+        <!--  UNISOC: add for feature 1071416 durationforward @{ -->
+        <activity
+            android:name="com.android.phone.CallForwardTimeEditPreference"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|keyboardHidden"
+            android:label="@string/labelCFT"
+            android:theme="@style/DialerSettingsLight">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+        <!-- @} -->
         <activity android:name="GsmUmtsCallForwardOptions"
                 android:label="@string/labelCF"
                 android:configChanges="orientation|screenSize|keyboardHidden"
@@ -321,10 +363,31 @@
             </intent-filter>
         </activity>
 
+        <!--  UNISOC: FEATURE_CDMA_CALL_FOR @{ -->
+        <activity
+            android:name="com.android.phone.CdmaCallForwardOptions"
+            android:label="@string/labelCF"
+            android:theme="@style/DisablePreviewDialerSettingsLight"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.android.phone.CdmaCallWaitingSetting"
+            android:label="@string/labelCW"
+            android:theme="@style/DisablePreviewDialerSettingsLight"
+            android:autoRemoveFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+        </activity>
+        <!-- @} -->
+
         <activity android:name="GsmUmtsCallBarringOptions"
                 android:label="@string/labelCallBarring"
                 android:configChanges="orientation|screenSize|keyboardHidden"
-                android:theme="@style/CallSettingsWithoutDividerTheme">
+                android:theme="@style/DialerSettingsLight">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>
@@ -342,7 +405,8 @@
         <!-- fdn setting -->
         <activity android:name="com.android.phone.settings.fdn.FdnSetting"
                 android:label="@string/fdn"
-                android:theme="@style/DialerSettingsLight">
+                android:theme="@style/DialerSettingsLight"
+                android:resizeableActivity="false">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
             </intent-filter>
@@ -387,7 +451,8 @@
         <activity android:name="CallFeaturesSetting"
                 android:label="@string/call_settings"
                 android:configChanges="orientation|screenSize|keyboardHidden"
-                android:theme="@style/DialerSettingsLight">
+                android:theme="@style/DialerSettingsLight"
+                android:resizeableActivity="false">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <action android:name="android.intent.action.MAIN" />
@@ -630,5 +695,17 @@
                 <action android:name="android.telephony.data.DataService" />
             </intent-filter>
         </service>
+        <!-- UNISOC: FL0108100003 One key simlock @{ -->
+        <receiver android:name="com.android.phone.SimLockOnekeyReceiver">
+            <intent-filter>
+                 <action android:name="android.provider.Telephony.SECRET_CODE" />
+                 <data android:scheme="android_secret_code" android:host="54321" />
+            </intent-filter>
+       </receiver>
+       <activity
+           android:name="com.android.phone.ChooseSimLockTypeActivity"
+           android:label="@string/one_key_simlock_setting">
+       </activity>
+       <!-- @} -->
     </application>
 </manifest>

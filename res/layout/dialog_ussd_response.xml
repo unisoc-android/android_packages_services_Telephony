@@ -19,14 +19,29 @@
      scrollView ScrollView, in the contentPanel LinearLayout, so it
      does not need to be replaced here.  For now, all we have is the
      input_field EditText to display user data entry. -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:paddingStart="20dp"
-    android:paddingEnd="20dp">
+    android:scrollbars="vertical" >
 
-    <EditText android:id="@+id/input_field"
+    <LinearLayout android:orientation="vertical"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content" />
+        android:layout_height="wrap_content">
 
-</FrameLayout>
+        <TextView
+            android:id="@+id/text_view"
+            style="@android:style/TextAppearance.Material.Subhead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="20dp"
+            android:paddingLeft="15dp"
+            android:paddingRight="15dp"
+            android:autoLink="phone" />
+
+        <EditText android:id="@+id/input_field"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+    </LinearLayout>
+
+</ScrollView>

@@ -22,6 +22,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.preference.Preference;
+import android.preference.PreferenceActivity;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
@@ -29,13 +31,16 @@ import android.view.WindowManager;
 
 import com.android.internal.telephony.MmiCode;
 import com.android.internal.telephony.Phone;
+import com.android.internal.telephony.PhoneConstants;
+import com.android.phone.CallFeaturesSetting;
 import com.android.phone.CarrierXmlParser;
 import com.android.phone.GsmUmtsAdditionalCallOptions;
 import com.android.phone.GsmUmtsCallOptions;
 import com.android.phone.PhoneGlobals;
 import com.android.phone.PhoneUtils;
 import com.android.phone.R;
-
+import android.util.FeatureFlagUtils;
+import android.provider.Settings;
 import java.util.HashMap;
 
 /**
@@ -46,6 +51,7 @@ public class SuppServicesUiUtil {
 
     private static final String CLIR_ACTIVATE = "#31#";
     private static final String CLIR_DEACTIVATE = "*31#";
+    public static final String MOBILE_NETWORK_V2 = "settings_mobile_network_v2";
 
     /**
      * show dialog for supplementary services over ut precaution.
@@ -56,31 +62,41 @@ public class SuppServicesUiUtil {
      */
     public static Dialog showBlockingSuppServicesDialog(Context context, Phone phone,
             String preferenceKey) {
+        return showBlockingSuppServicesDialog(context, phone, preferenceKey, null);
+    }
+
+    public static Dialog showBlockingSuppServicesDialog(Context context, Phone phone,
+            String preferenceKey, CallFeaturesSetting callFeaturesSetting) {
         if (context == null || phone == null) {
             return null;
         }
-
-        String message = makeMessage(context, preferenceKey, phone);
+        //UNISOC: add by bug1149158
+        Preference preference = ((PreferenceActivity) context).findPreference(preferenceKey);
+        if (preference == null || preference.getIntent() == null) {
+            return null;
+        }
 
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        DialogInterface.OnClickListener networkSettingsClickListener =
-                new Dialog.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        Intent intent = new Intent(Intent.ACTION_MAIN);
-                        ComponentName mobileNetworkSettingsComponent = new ComponentName(
-                                context.getString(R.string.mobile_network_settings_package),
-                                context.getString(R.string.mobile_network_settings_class));
-                        intent.setComponent(mobileNetworkSettingsComponent);
-                        context.startActivity(intent);
-                    }
-                };
-        return builder.setMessage(message)
-                .setNeutralButton(context.getResources().getString(
-                        R.string.settings_label),
-                        networkSettingsClickListener)
+        DialogInterface.OnClickListener networkSettingsClickListener = new Dialog.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                //UNISOC: modify by bug1149158
+                if (phone.getPhoneType() == PhoneConstants.PHONE_TYPE_CDMA
+                        && preference.getKey().equals(GsmUmtsCallOptions.CALL_FORWARDING_KEY)
+                        && callFeaturesSetting != null) {
+                    callFeaturesSetting.queryCallForwardFirstByUt();
+                } else {
+                    context.startActivity(preference.getIntent());
+                }
+            }
+        };
+        return builder.setMessage(context.getResources().getString(R.string.network_not_on))
+                .setTitle(context.getResources().getString(R.string.error_updating_title))
                 .setPositiveButton(context.getResources().getString(
-                        R.string.supp_service_over_ut_precautions_dialog_dismiss), null)
+                        R.string.alert_dialog_yes),
+                        networkSettingsClickListener)
+                .setNegativeButton(context.getResources().getString(
+                        R.string.alert_dialog_no), null)
                 .create();
     }
 

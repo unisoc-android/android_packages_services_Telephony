@@ -13,6 +13,18 @@
          android:title="@string/labelCallBarring"
          android:persistent="false" />
 
+    <!-- UNISOC: function IP Porting @{ -->
+    <PreferenceScreen
+        android:key="ip_dial_key"
+        android:title="@string/ip_dialing_setting"
+        android:persistent="false">
+        <intent
+            android:action="android.intent.action.MAIN"
+            android:targetClass="com.android.dialer.app.ipdial.IpNumberListActivity"
+            android:targetPackage="com.android.dialer" />
+    </PreferenceScreen>
+    <!-- @} -->
+
     <PreferenceScreen
         android:key="additional_gsm_call_settings_key"
         android:title="@string/additional_gsm_call_settings"

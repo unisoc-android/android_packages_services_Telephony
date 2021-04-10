@@ -170,7 +170,8 @@
 
     <style name="DialerSettingsLight" parent="SettingsLight">
         <!-- Action bar.-->
-        <item name="android:tint">@color/dialer_secondary_text_color</item>
+        <!-- UNISOC:fix for bug 1108495 -->
+        <!-- <item name="android:tint">@color/dialer_secondary_text_color</item> -->
         <item name="android:windowBackground">@color/dialer_background_color</item>
         <item name="android:actionModeBackground">@color/dialer_background_color</item>
         <item name="android:windowLightStatusBar">true</item>
@@ -180,6 +181,8 @@
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:colorAccent">@color/dialer_theme_color</item>
         <item name="android:dialogTheme">@style/DialerAlertDialogTheme</item>
+        <!-- UNISOC:fix for bug 1119064 -->
+        <item name="android:homeAsUpIndicator">@drawable/ic_back_arrow</item>
     </style>
 
     <style name="DialerAlertDialogTheme"
@@ -355,5 +358,10 @@
 
     <style name="ShortcutsHintTextAppearance" parent="@style/HeadlineTextAppearance">
         <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="DisablePreviewDialerSettingsLight" parent="DialerSettingsLight">
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:dialogTheme">@android:style/Theme.Material.Light.Dialog</item>
     </style>
 </resources>

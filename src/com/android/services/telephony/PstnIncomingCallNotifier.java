@@ -16,6 +16,7 @@
 
 package com.android.services.telephony;
 
+import android.content.Intent;
 import android.net.Uri;
 import android.os.AsyncResult;
 import android.os.Bundle;
@@ -247,6 +248,8 @@ final class PstnIncomingCallNotifier {
      * Sends the incoming call intent to telecom.
      */
     private void sendIncomingCallIntent(Connection connection) {
+        // UNISOC: Close system dialogs while there is an incoming call.
+        mPhone.getContext().sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
         Bundle extras = new Bundle();
         if (connection.getNumberPresentation() == TelecomManager.PRESENTATION_ALLOWED &&
                 !TextUtils.isEmpty(connection.getAddress())) {
@@ -340,6 +343,13 @@ final class PstnIncomingCallNotifier {
         Connection original = telephonyConnection.getOriginalConnection();
         if (original != null && !original.isIncoming()
                 && Objects.equals(original.getAddress(), unknown.getAddress())) {
+            // UNISOC: Fix bug1217065
+            // Work around: As call state can't be tramsform from HOLDING/ACTIVE to DIALING.
+            if ((original.getState() == Call.State.HOLDING
+                    || original.getState() == Call.State.ACTIVE)
+                    && unknown.getState() == Call.State.DIALING) {
+                return false;
+            }
             // If the new unknown connection is an external connection, don't swap one with an
             // actual connection.  This means a call got pulled away.  We want the actual connection
             // to disconnect.

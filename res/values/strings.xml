@@ -140,7 +140,7 @@
     <!-- Label for list item which opens a dialog to select the default outgoing account for SIP calls. -->
     <string name="phone_accounts_make_sip_calls_with">Make SIP calls with</string>
     <!-- Entry in dialog to "ask first" for accounts when making a call -->
-    <string name="phone_accounts_ask_every_time">Ask first</string>
+    <string name="phone_accounts_ask_every_time">Ask every time</string>
     <!-- Account label for when a SIM account has no service (i.e. airplane mode) -->
     <string name="phone_accounts_default_account_label">No network available</string>
 
@@ -522,17 +522,14 @@
     <string name="call_category">Calling</string>
     <!-- Mobile network settings screen, name for network operator category -->
     <string name="network_operator_category">Network</string>
-
-    <!-- Mobile network 4G title [CHAR LIMIT=30] -->
-    <string name="enhanced_4g_lte_mode_title">Enhanced 4G LTE Mode</string>
     <!-- Carrier variant of Enhaced 4G LTE Mode title.  [CHAR LIMIT=50] -->
     <string-array name="enhanced_4g_lte_mode_title_variant">
         <!-- 0: Default -->
         <item>@string/enhanced_4g_lte_mode_title</item>
         <!-- 1: Verizon -->
-        <item>Advanced Calling</item>
-        <!-- 2: O2 UK -->
-        <item>4G Calling</item>
+        <item>@string/enhanced_4g_lte_mode_title_advanced_calling</item>
+        <!-- 2: All carriers who want 4G -->
+        <item>@string/enhanced_4g_lte_mode_title_4g_calling</item>
     </string-array>
 
     <!-- Mobile network 4G summary [CHAR LIMIT=80] -->
@@ -882,10 +879,10 @@
 
     <!-- FDN settings strings -->
     <!-- Label for "Fixed Dialing Number" settings in call settings. -->
-    <string name="fdn">Fixed Dialing Numbers</string>
+    <string name="fdn">Fixed dialing numbers</string>
     <!-- Title for "Fixed Dialing Number" settings, with a label to identify the SIM the settings
         apply to. -->
-    <string name="fdn_with_label">Fixed Dialing Numbers (<xliff:g id="subscriptionlabel" example="Verizon">%s</xliff:g>)</string>
+    <string name="fdn_with_label">Fixed dialing numbers (<xliff:g id="subscriptionlabel" example="Verizon">%s</xliff:g>)</string>
 
     <!-- Call settings screen, button label that takes you to the Fixed Dialing Number management screen -->
     <string name="manage_fdn_list">FDN list</string>
@@ -895,9 +892,9 @@
     <!-- Call settings screen, preference item label -->
     <string name="fdn_activation">FDN activation</string>
     <!-- Call settings setting option name when FDN is enabled -->
-    <string name="fdn_enabled">Fixed Dialing Numbers are enabled</string>
+    <string name="fdn_enabled">Fixed dialing numbers are enabled</string>
     <!-- Call settings setting option name  when FDN is disabled-->
-    <string name="fdn_disabled">Fixed Dialing Numbers are disabled</string>
+    <string name="fdn_disabled">Fixed dialing numbers are disabled</string>
     <!-- Call settings screen, setting option name -->
     <string name="enable_fdn">Enable FDN</string>
     <!-- Call settings screen, setting option name -->
@@ -944,13 +941,13 @@
     <!-- Title of "Edit FDN Contact" screen for a new contact -->
     <string name="add_fdn_contact">Add fixed dialing number</string>
     <!-- "Edit FDN Contact" screen: status message displayed in a popup (toast) -->
-    <string name="adding_fdn_contact">Adding fixed dialing number\u2026</string>
+    <string name="adding_fdn_contact">Adding fixed dialing number,please do not repeat operation.</string>
     <!-- "Edit FDN Contact" screen: status message displayed in a popup (toast) -->
     <string name="fdn_contact_added">Fixed dialing number added.</string>
     <!-- Title of "Edit FDN Contact" screen when editing an already-existing contact -->
     <string name="edit_fdn_contact">Edit fixed dialing number</string>
     <!-- "Edit FDN Contact" screen: status message displayed in a popup (toast) -->
-    <string name="updating_fdn_contact">Updating fixed dialing number\u2026</string>
+    <string name="updating_fdn_contact">Updating fixed dialing number,please do not repeat operation.</string>
     <!-- "Edit FDN Contact" screen: status message displayed in a popup (toast) -->
     <string name="fdn_contact_updated">Fixed dialing number updated.</string>
     <!-- Title of "Delete FDN Contact" screen -->
@@ -960,9 +957,10 @@
     <!-- "Delete FDN Contact" screen: status message displayed in a popup (toast) -->
     <string name="fdn_contact_deleted">Fixed dialing number deleted.</string>
     <!-- FDN settings: error message displayed in a popup (toast) -->
-    <string name="pin2_invalid">FDN wasn\'t updated because you typed an incorrect PIN.</string>
+    <string name="pin2_invalid">FDN wasn\'t updated because you typed an incorrect PIN2.</string>
     <!-- FDN settings: error message displayed in a popup (toast) -->
-    <string name="fdn_invalid_number">FDN wasn\'t updated because the number exceeds 20 digits.</string>
+    <!-- UNISOC: modify for bug889286 -->
+    <string name="fdn_invalid_number">FDN wasn\'t updated because the number exceeds <xliff:g id="FDN_NUMBER_LIMIT_LENGTH">%d</xliff:g> digits.</string>
     <!-- FDN settings: error message displayed in a popup (toast), when the entered
          FDN number was inappropriate, OR, PIN2 the user entered was incorrect.
          Because of API restriction, there's no way to determine which is the exact
@@ -1747,7 +1745,7 @@
     <!-- Call barring settings screen, change password -->
     <string name="call_barring_change_pwd_description">Change call barring password</string>
     <!-- Call barring settings screen, not possible to change call barring password -->
-    <string name="call_barring_change_pwd_description_disabled">Cannot change call barring password.</string>
+    <string name="call_barring_change_pwd_description_disabled">Cannot change call barring password</string>
     <!-- Call barring settings screen, change password -->
     <string name="call_barring_pwd_not_match">Passwords do not match</string>
     <!-- Call barring settings screen, change password -->
@@ -1861,4 +1859,6 @@
     <string name="supp_service_over_ut_precautions_roaming_dual_sim">To use <xliff:g id="supp service">%1$s</xliff:g>, make sure mobile data and data roaming are turned on for SIM <xliff:g id="sim number">%2$d</xliff:g>. You can change these in mobile network settings.</string>
     <!-- supplementary services over ut precaution exit dialog choice -->
     <string name="supp_service_over_ut_precautions_dialog_dismiss">Dismiss</string>
+    <!-- UNISOC: Bug 1072957 Reliance block notification. -->
+    <string name="blocked_call_notification">"Blocked Call"</string>
 </resources>

@@ -46,8 +46,10 @@ import android.service.carrier.CarrierIdentifier;
 import android.service.carrier.CarrierService;
 import android.service.carrier.ICarrierService;
 import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManagerEx;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
+import android.text.TextUtils;
 import android.util.LocalLog;
 import android.util.Log;
 
@@ -110,6 +112,11 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
     private final BroadcastReceiver mPackageReceiver = new ConfigLoaderBroadcastReceiver();
     private final LocalLog mCarrierConfigLoadingLog = new LocalLog(50);
 
+    // UNISOC: Feature configs from default app, include area config,country config and operator config.
+    private PersistableBundle mFeatureConfigFromDefaultApp;
+    // UNISOC: Add service connection for feature config.
+    private CarrierServiceConnection mFeatureServiceConnection;
+    private final static int FEATURE_PHONE_ID = -100;
 
     // Message codes; see mHandler below.
     // Request from SubscriptionInfoUpdater when SIM becomes absent or error.
@@ -142,6 +149,14 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
     private static final int EVENT_FETCH_CARRIER_TIMEOUT = 15;
     // SubscriptionInfoUpdater has finished updating the sub for the carrier config.
     private static final int EVENT_SUBSCRIPTION_INFO_UPDATED = 16;
+
+    // UNISOC: Attempt to fetch from default app or read from XML to get feature configs.
+    private static final int EVENT_DO_FETCH_DEFAULT_FOR_FEATURE_CONFIG = 23;
+    // UNISOC: Has connected to default app for feature configs.
+    private static final int EVENT_CONNECTED_TO_DEFAULT_FOR_FEATURE_CONFIG = 24;
+    private static final int EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_DONE = 25;
+    private static final int EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_TIMEOUT = 26;
+    private static final int EVENT_BIND_NET_FEATUR_CONFIG_TIMEOUT = 27;
 
     private static final int BIND_TIMEOUT_MILLIS = 30000;
 
@@ -203,6 +218,7 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
                             updateConfigForPhoneId(i);
                         }
                     }
+                    updateFeatureConfigs();
                     break;
                 }
 
@@ -224,6 +240,13 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
                 {
                     final PersistableBundle config =
                             restoreConfigFromXml(mPlatformCarrierConfigPackage, phoneId);
+                    final String iccid = getIccIdForPhoneId(phoneId);
+                    String simOperator = TelephonyManager.from(mContext).getSimOperatorNumericForPhone(phoneId);
+                    // UNISOC : Modify the Bug1028301
+                    if (TextUtils.isEmpty(iccid) || TextUtils.isEmpty(simOperator)) {
+                        log(" iccid or mccmnc is empty，no valid sim card,return !! ");
+                        return;
+                    }
                     if (config != null) {
                         log(
                                 "Loaded config from XML. package="
@@ -495,6 +518,25 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
                 case EVENT_SUBSCRIPTION_INFO_UPDATED:
                     broadcastConfigChangedIntent(phoneId);
                     break;
+
+                case EVENT_DO_FETCH_DEFAULT_FOR_FEATURE_CONFIG:
+                    fetchDefaultConfig(msg);
+                    break;
+                case EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_DONE:
+                    if (!msg.getData().getBoolean("loaded_from_xml", false)
+                            && mFeatureServiceConnection == null) {
+                        break;
+                    }
+                    broadcastConfigChangedIntent(phoneId, false);
+                    break;
+                case EVENT_CONNECTED_TO_DEFAULT_FOR_FEATURE_CONFIG:
+                    connectToDefaultApp(msg);
+                    break;
+                case EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_TIMEOUT:
+                    mContext.unbindService(mFeatureServiceConnection);
+                    removeMessages(EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_TIMEOUT);
+                    broadcastConfigChangedIntent(phoneId, false);
+                    break;
             }
         }
     }
@@ -532,6 +574,9 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
         mHasSentConfigChange = new boolean[numPhones];
         // Make this service available through ServiceManager.
         ServiceManager.addService(Context.CARRIER_CONFIG_SERVICE, this);
+        mFeatureConfigFromDefaultApp = new PersistableBundle();
+        // load feature config.
+        updateFeatureConfigs();
         log("CarrierConfigLoader has started");
         mSubscriptionInfoUpdater = PhoneFactory.getSubscriptionInfoUpdater();
         mHandler.sendEmptyMessage(EVENT_CHECK_SYSTEM_UPDATE);
@@ -582,19 +627,35 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
                 Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND |
                 Intent.FLAG_RECEIVER_FOREGROUND);
         // Include subId/carrier id extra only if SIM records are loaded
-        TelephonyManager telephonyManager = TelephonyManager.from(mContext);
+
+        //UNISOC:Add for Bug1146001,get current phoneId simApplicationState,not default subId
+        //TelephonyManager telephonyManager = TelephonyManager.from(mContext);
+        int[] subIds = SubscriptionManager.getSubId(phoneId);
+        int subId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+        if (subIds != null && subIds.length >= 1) {
+            subId = subIds[0];
+        }
+        TelephonyManager telephonyManager = new TelephonyManager(mContext, subId);
         int simApplicationState = telephonyManager.getSimApplicationState();
+        int simCardState = telephonyManager.getSimState(SubscriptionManager.getPhoneId(subId));
+
         if (addSubIdExtra && (simApplicationState != TelephonyManager.SIM_STATE_UNKNOWN
                 && simApplicationState != TelephonyManager.SIM_STATE_NOT_READY)) {
             SubscriptionManager.putPhoneIdAndSubIdExtra(intent, phoneId);
             intent.putExtra(TelephonyManager.EXTRA_SPECIFIC_CARRIER_ID,
                     getSpecificCarrierIdForPhoneId(phoneId));
             intent.putExtra(TelephonyManager.EXTRA_CARRIER_ID, getCarrierIdForPhoneId(phoneId));
+            intent.putExtra(CarrierConfigManagerEx.CARRIER_CONFIG_CHANGED_TYPE, CarrierConfigManagerEx.CONFIG_SUBINFO);
+        } else {
+            intent.putExtra(CarrierConfigManagerEx.CARRIER_CONFIG_CHANGED_TYPE, CarrierConfigManagerEx.CONFIG_FEATURE);
         }
         intent.putExtra(CarrierConfigManager.EXTRA_SLOT_INDEX, phoneId);
         log("Broadcast CARRIER_CONFIG_CHANGED for phone " + phoneId);
         ActivityManager.broadcastStickyIntent(intent, UserHandle.USER_ALL);
-        mHasSentConfigChange[phoneId] = true;
+        if (simApplicationState == TelephonyManager.SIM_STATE_LOADED
+                || simCardState == TelephonyManager.SIM_STATE_ABSENT) {
+            mHasSentConfigChange[phoneId] = true;
+        }
     }
 
     /** Binds to the default or carrier config app. */
@@ -709,14 +770,14 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
      */
     private void saveConfigToXml(String packageName, int phoneId, PersistableBundle config) {
         if (SubscriptionManager.getSimStateForSlotIndex(phoneId)
-                != TelephonyManager.SIM_STATE_LOADED) {
+                != TelephonyManager.SIM_STATE_LOADED && phoneId != FEATURE_PHONE_ID) {
             loge("Skip save config because SIM records are not loaded.");
             return;
         }
 
         final String iccid = getIccIdForPhoneId(phoneId);
         final int cid = getSpecificCarrierIdForPhoneId(phoneId);
-        if (packageName == null || iccid == null) {
+        if (packageName == null || (iccid == null && phoneId != FEATURE_PHONE_ID)) {
             loge("Cannot save config with null packageName or iccid.");
             return;
         }
@@ -786,14 +847,14 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
             return null;
         }
         if (SubscriptionManager.getSimStateForSlotIndex(phoneId)
-                != TelephonyManager.SIM_STATE_LOADED) {
+                != TelephonyManager.SIM_STATE_LOADED && phoneId != FEATURE_PHONE_ID) {
             loge("Skip restoring config because SIM records are not yet loaded.");
             return null;
         }
 
         final String iccid = getIccIdForPhoneId(phoneId);
         final int cid = getSpecificCarrierIdForPhoneId(phoneId);
-        if (packageName == null || iccid == null) {
+        if (packageName == null || (iccid == null && phoneId != FEATURE_PHONE_ID)) {
             loge("Cannot restore config with null packageName or iccid.");
             return null;
         }
@@ -868,6 +929,9 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
     /** Builds a canonical file name for a config file. */
     private String getFilenameForConfig(@NonNull String packageName, @NonNull String iccid,
                                         int cid) {
+        if (TextUtils.isEmpty(iccid)) {
+            return "carrierconfig-" + packageName + getBandVersion() + ".xml";
+        }
         // the same carrier should have a single copy of XML file named after carrier id.
         // However, it's still possible that platform doesn't recognize the current sim carrier,
         // we will use iccid + carrierid as the canonical file name. carrierid can also handle the
@@ -908,14 +972,21 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
                 mContext, subId, callingPackage, "getCarrierConfig")) {
             return new PersistableBundle();
         }
-
         int phoneId = SubscriptionManager.getPhoneId(subId);
+        if (subId == SubscriptionManager.DEFAULT_SUBSCRIPTION_ID) {
+            phoneId = 0;
+        }
         PersistableBundle retConfig = CarrierConfigManager.getDefaultConfig();
         if (SubscriptionManager.isValidPhoneId(phoneId)) {
             PersistableBundle config = mConfigFromDefaultApp[phoneId];
             if (config != null) {
                 retConfig.putAll(config);
                 retConfig.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+            }
+            config = mFeatureConfigFromDefaultApp;
+            if (config != null) {
+                retConfig.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, true);
+                retConfig.putAll(config);
             }
             config = mConfigFromCarrierApp[phoneId];
             if (config != null) {
@@ -1121,4 +1192,106 @@ public class CarrierConfigLoader extends ICarrierConfigLoader.Stub {
         Log.e(LOG_TAG, msg);
         mCarrierConfigLoadingLog.log(msg);
     }
+
+    /*
+     * UNISOC:Add for feature configs @{
+     */
+    private void updateFeatureConfigs() {
+        log("update feature configs");
+        mContext.enforceCallingOrSelfPermission(
+                android.Manifest.permission.MODIFY_PHONE_STATE, null);
+        mHandler.sendMessage(mHandler.obtainMessage(EVENT_DO_FETCH_DEFAULT_FOR_FEATURE_CONFIG));
+    }
+
+    private void fetchDefaultConfig(Message msg) {
+        int phoneId = msg.arg1;
+        PersistableBundle config = restoreConfigFromXml(mPlatformCarrierConfigPackage,FEATURE_PHONE_ID);
+        if (config != null) {
+            log("Loaded config from XML[" + msg.what + "]. package="
+                    + mPlatformCarrierConfigPackage + " phoneId=" + phoneId);
+            mFeatureConfigFromDefaultApp = config;
+            Message newMsg = mHandler.obtainMessage(EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_DONE, phoneId, -1);
+            newMsg.getData().putBoolean("loaded_from_xml", true);
+            mHandler.sendMessage(newMsg);
+        } else {
+            if (bindToConfigPackageForFeature(mPlatformCarrierConfigPackage, phoneId,
+                    EVENT_CONNECTED_TO_DEFAULT_FOR_FEATURE_CONFIG)) {
+                mHandler.sendMessageDelayed(
+                        mHandler.obtainMessage(EVENT_BIND_NET_FEATUR_CONFIG_TIMEOUT, phoneId, -1),
+                        BIND_TIMEOUT_MILLIS);
+            } else {
+                // Send bcast if bind fails
+                broadcastConfigChangedIntent(phoneId,false);
+            }
+        }
+    }
+
+    private void connectToDefaultApp(Message msg) {
+        mHandler.removeMessages(EVENT_BIND_NET_FEATUR_CONFIG_TIMEOUT);
+        int phoneId = msg.arg1;
+        CarrierServiceConnection conn = (CarrierServiceConnection) msg.obj;
+        // If new service connection has been created, unbind.
+        if (mFeatureServiceConnection != conn || conn.service == null) {
+            mContext.unbindService(conn);
+            return;
+        }
+        CarrierIdentifier carrierIdentifier = getCarrierIdentifierForPhoneId(SubscriptionManager.INVALID_PHONE_INDEX);
+        final ResultReceiver resultReceiver =
+                new ResultReceiver(mHandler) {
+                    @Override
+                    public void onReceiveResult(int resultCode, Bundle resultData) {
+                        log("feature carrier config onbind");
+                        mContext.unbindService(conn);
+                        mHandler.removeMessages(EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_TIMEOUT);
+                        // If new service connection has been created, this is stale.
+                        if (mFeatureServiceConnection != conn) {
+                            loge("Received response for stale request.");
+                            return;
+                        }
+                        if (resultCode == RESULT_ERROR || resultData == null) {
+                            // On error, abort config fetching.
+                            log("Failed to get carrier config");
+                            broadcastConfigChangedIntent(phoneId, false);
+                            return;
+                        }
+                        PersistableBundle config = resultData.getParcelable(KEY_CONFIG_BUNDLE);
+                        saveConfigToXml(mPlatformCarrierConfigPackage, FEATURE_PHONE_ID , config);
+                        mFeatureConfigFromDefaultApp = config;
+                        mHandler.sendMessage(
+                                mHandler.obtainMessage(EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_DONE, phoneId, -1));
+                    }
+                };
+        // Now fetch the config asynchronously from the ICarrierService.
+        try {
+            ICarrierService carrierService = ICarrierService.Stub
+                    .asInterface(conn.service);
+            carrierService.getCarrierConfig(carrierIdentifier, resultReceiver);
+        } catch (RemoteException ex) {
+            log("Failed to get config[" + msg.what + "]: " + ex.toString());
+            mContext.unbindService(mFeatureServiceConnection);
+            return;
+        }
+        mHandler.sendMessageDelayed(
+                mHandler.obtainMessage(EVENT_FETCH_DEFAULT_FOR_FEATURE_CONFIG_TIMEOUT, phoneId, -1),
+                BIND_TIMEOUT_MILLIS);
+
+    }
+
+    private boolean bindToConfigPackageForFeature(String pkgName, int phoneId, int eventId) {
+        logWithLocalLog("Binding to " + pkgName + " for feature ");
+        Intent carrierService = new Intent(CarrierService.CARRIER_SERVICE_INTERFACE);
+        carrierService.setPackage(pkgName);
+        mFeatureServiceConnection = new CarrierServiceConnection(phoneId, eventId);
+        try {
+            return mContext.bindService(carrierService, mFeatureServiceConnection,
+                    Context.BIND_AUTO_CREATE);
+        } catch (SecurityException ex) {
+            return false;
+        }
+    }
+
+    private String getBandVersion() {
+        return "-vender";
+    }
+    /* @} */
 }

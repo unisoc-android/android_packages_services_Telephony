@@ -261,4 +261,6 @@
          slot. If true, telephony will always try to place the emergency call on the subscription
          associated with default data first, instead of using the default voice configuration.-->
     <bool name="config_gnss_supl_requires_default_data_for_emergency">false</bool>
+    <!-- UNISOC: Add block number notification for bug1072957. -->
+    <bool name="config_block_number_notification">false</bool>
 </resources>

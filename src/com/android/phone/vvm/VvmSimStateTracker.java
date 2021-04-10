@@ -142,7 +142,8 @@ public class VvmSimStateTracker extends BroadcastReceiver {
                 PhoneAccountHandle phoneAccountHandle =
                         PhoneAccountHandleConverter.fromSubId(subId);
 
-                if ("null".equals(phoneAccountHandle.getId())) {
+                //UNISOC: add for bug1094342
+                if (phoneAccountHandle == null || "null".equals(phoneAccountHandle.getId())) {
                     VvmLog.e(TAG,
                             "null phone account handle ID, possible modem crash."
                                     + " Ignoring carrier config changed event");

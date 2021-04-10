@@ -63,7 +63,7 @@
     <string name="phone_accounts" msgid="6376603393888116364">"通話帳戶"</string>
     <string name="phone_accounts_make_calls_with" msgid="1969188078933152231">"通話帳戶"</string>
     <string name="phone_accounts_make_sip_calls_with" msgid="4677789312053828493">"SIP 通話帳戶"</string>
-    <string name="phone_accounts_ask_every_time" msgid="4346499067149985702">"先詢問我"</string>
+    <string name="phone_accounts_ask_every_time" msgid="4346499067149985702">"每次都詢問"</string>
     <string name="phone_accounts_default_account_label" msgid="4183772241814460014">"沒有網絡可用"</string>
     <string name="phone_accounts_settings_header" msgid="4141710640883261094">"設定"</string>
     <string name="phone_accounts_choose_accounts" msgid="5232948804226424002">"選擇賬戶"</string>
@@ -99,7 +99,8 @@
     <string name="sum_cw_disabled" msgid="3648693907300104575">"通話時如有來電請通知我"</string>
     <string name="call_forwarding_settings" msgid="3378927671091537173">"來電轉駁設定"</string>
     <string name="call_forwarding_settings_with_label" msgid="8569489414006897127">"來電轉駁設定 (<xliff:g id="SUBSCRIPTIONLABEL">%s</xliff:g>)"</string>
-    <string name="labelCF" msgid="2574386948026924737">"來電轉駁"</string>
+    <!--UNISOC modify for bug911444-->
+    <string name="labelCF" msgid="2574386948026924737">"來電轉接"</string>
     <string name="labelCFU" msgid="8147177368148660600">"全部轉駁"</string>
     <string name="messageCFU" msgid="3560082430662923687">"永遠使用這個號碼"</string>
     <string name="sum_cfu_enabled_indicator" msgid="4014187342724130197">"轉接所有通話"</string>

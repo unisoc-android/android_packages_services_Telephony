@@ -20,6 +20,7 @@ import android.content.Context;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.PersistableBundle;
 import android.telecom.Conference;
 import android.telecom.ConferenceParticipant;
@@ -33,6 +34,7 @@ import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.CarrierConfigManager;
 import android.telephony.PhoneNumberUtils;
+import android.text.TextUtils;
 import android.util.Pair;
 
 import com.android.internal.annotations.VisibleForTesting;
@@ -277,6 +279,12 @@ public class ImsConference extends Conference implements Holdable {
      * in the CEP.
      */
     private Pair<Uri, Uri> mHostParticipantIdentity = null;
+    // UNISOC: Ims conference calllog time & type refactor.
+    private ArrayList<TelephonyConnection> mMemberConnections;
+
+    // UNISOC: set conference state delay.
+    private static final int SET_CONFERENCE_STATE_DELAY_MS = 500;
+
 
     public void updateConferenceParticipantsAfterCreation() {
         if (mConferenceHost != null) {
@@ -299,22 +307,55 @@ public class ImsConference extends Conference implements Holdable {
     public ImsConference(TelecomAccountRegistry telecomAccountRegistry,
             TelephonyConnectionServiceProxy telephonyConnectionService,
             TelephonyConnection conferenceHost, PhoneAccountHandle phoneAccountHandle,
-            FeatureFlagProxy featureFlagProxy) {
+            FeatureFlagProxy featureFlagProxy, ArrayList<TelephonyConnection> memberConnections) {
 
         super(phoneAccountHandle);
 
         mTelecomAccountRegistry = telecomAccountRegistry;
         mFeatureFlagProxy = featureFlagProxy;
 
+        // UNISOC: Ims conference calllog time & type refactor.
+        mMemberConnections = (ArrayList<TelephonyConnection>) memberConnections.clone();
+
         // Specify the connection time of the conference to be the connection time of the original
         // connection.
         long connectTime = conferenceHost.getOriginalConnection().getConnectTime();
         long connectElapsedTime = conferenceHost.getOriginalConnection().getConnectTimeReal();
-        setConnectionTime(connectTime);
+
+        /*
+         * UNISOC: use cpu time instead of system time @{
+         * @orig
+           setConnectionTime(connectTime);
+           setConnectionStartElapsedRealTime(connectElapsedTime);
+           // Set the connectTime in the connection as well.
+           conferenceHost.setConnectTimeMillis(connectTime);
+           conferenceHost.setConnectionStartElapsedRealTime(connectElapsedTime);
+         */
+        long connectTimeReal = System.currentTimeMillis()
+                - conferenceHost.getOriginalConnection().getDurationMillis();
+
+        /* UNISOC: Ims conference calllog time & type refactor. @{ */
+        if (mMemberConnections != null) {
+            for (TelephonyConnection telephonyConnection : mMemberConnections) {
+                if (telephonyConnection != null) {
+                    connectTimeReal = Math.min(System.currentTimeMillis()
+                                    - telephonyConnection.getOriginalConnection()
+                            .getDurationMillis(), connectTimeReal);
+                }
+            }
+        }
+        /* @} */
+
+        if (conferenceHost.getOriginalConnection().getState() == Call.State.DIALING) {
+            setConnectionTime(connectTime);
+            conferenceHost.setConnectTimeMillis(connectTime);
+        } else {
+            setConnectionTime(connectTimeReal);
+            conferenceHost.setConnectTimeMillis(connectTimeReal);
+        }
         setConnectionStartElapsedRealTime(connectElapsedTime);
-        // Set the connectTime in the connection as well.
-        conferenceHost.setConnectTimeMillis(connectTime);
         conferenceHost.setConnectionStartElapsedRealTime(connectElapsedTime);
+        /* @} */
 
         mTelephonyConnectionService = telephonyConnectionService;
         setConferenceHost(conferenceHost);
@@ -461,6 +502,10 @@ public class ImsConference extends Conference implements Holdable {
             } catch (CallStateException e) {
                 Log.e(this, e, "Exception thrown trying to hangup conference");
             }
+        }
+        // UNISOC: Ims conference calllog time & type refactor.
+        if (mMemberConnections != null) {
+            mMemberConnections.clear();
         }
     }
 
@@ -760,7 +805,8 @@ public class ImsConference extends Conference implements Holdable {
             // 2. We're emulating a single party call and the CEP contains more than just the
             //    single party
             if ((mIsEmulatingSinglePartyCall && !isSinglePartyConference) ||
-                !mIsEmulatingSinglePartyCall) {
+                !mIsEmulatingSinglePartyCall ||
+                shouldUpdateSiglePartyConference(isSinglePartyConference ,participants)) {
                 // Add any new participants and update existing.
                 for (ConferenceParticipant participant : participants) {
                     Pair<Uri, Uri> userEntity = new Pair<>(participant.getHandle(),
@@ -813,11 +859,16 @@ public class ImsConference extends Conference implements Holdable {
 
                     if (!participantUserEntities.contains(entry.getKey())) {
                         ConferenceParticipantConnection participant = entry.getValue();
-                        participant.setDisconnected(new DisconnectCause(DisconnectCause.CANCELED));
+                        /*UNISOC: add for VoLTE
+                         * @Orig:participant.setDisconnected(new DisconnectCause(DisconnectCause.CANCELED));
+                         * {*/
+                        participant.setDisconnected(new DisconnectCause(DisconnectCause.LOCAL));
+                        /*@}*/
                         participant.removeConnectionListener(mParticipantListener);
                         mTelephonyConnectionService.removeConnection(participant);
                         removeConnection(participant);
                         entryIterator.remove();
+                        mConferenceParticipantConnections.remove(entry.getKey());
                         oldParticipantsRemoved = true;
                     }
                 }
@@ -829,7 +880,7 @@ public class ImsConference extends Conference implements Holdable {
             // If the single party call emulation fature flag is enabled, we can potentially treat
             // the conference as a single party call when there is just one participant.
             if (mFeatureFlagProxy.isUsingSinglePartyCallEmulation()) {
-                if (oldParticipantCount > 1 && newParticipantCount == 1) {
+                if (/*oldParticipantCount > 1 && */newParticipantCount == 1) {//UNISOC:modify for bug1171865
                     // If number of participants goes to 1, emulate a single party call.
                     startEmulatingSinglePartyCall();
                 } else if (mIsEmulatingSinglePartyCall && !isSinglePartyConference) {
@@ -837,7 +888,6 @@ public class ImsConference extends Conference implements Holdable {
                     stopEmulatingSinglePartyCall();
                 }
             }
-
             // If new participants were added or old ones were removed, we need to ensure the state
             // of the manage conference capability is updated.
             if (newParticipantsAdded || oldParticipantsRemoved) {
@@ -899,11 +949,11 @@ public class ImsConference extends Conference implements Holdable {
      *    the future we'll just re-add the participant anyways.
      * 2. Tell telecom we're not a conference.
      * 3. Remove {@link Connection#CAPABILITY_MANAGE_CONFERENCE} capability.
-     * 4. Set the name/address to that of the single participant.
+     * 4. Set the name/address/call-direction to that of the single participant.
      *
      * Note: Single party call emulation is disabled if the conference is taking place via a
      * sim call manager.  Emulating a single party call requires properties of the conference to be
-     * changed (connect time, address, conference state) which cannot be guaranteed to be relayed
+     * changed (connect time, address, conference state, call direction) which cannot be guaranteed to be relayed
      * correctly by the sim call manager to Telecom.
      */
     private void startEmulatingSinglePartyCall() {
@@ -921,11 +971,15 @@ public class ImsConference extends Conference implements Holdable {
         if (valueIterator.hasNext()) {
             ConferenceParticipantConnection entry = valueIterator.next();
 
-            // Set the conference name/number to that of the remaining participant.
+            // Set the conference name/number/call-direction to that of the remaining participant.
             setAddress(entry.getAddress(), entry.getAddressPresentation());
             setCallerDisplayName(entry.getCallerDisplayName(),
                     entry.getCallerDisplayNamePresentation());
             setConnectionStartElapsedRealTime(entry.getConnectElapsedTimeMillis());
+            // UNISOC: fix bug1206777
+            Bundle extra = new Bundle();
+            extra.putInt(Connection.EXTRA_CALL_DIRECTION, entry.getCallDirection());
+            setExtras(extra);
             setConnectionTime(entry.getConnectTimeMillis());
             mLoneParticipantIdentity = new Pair<>(entry.getUserEntity(), entry.getEndpoint());
 
@@ -938,9 +992,11 @@ public class ImsConference extends Conference implements Holdable {
             removeConnection(entry);
             valueIterator.remove();
         }
-
         // Have Telecom pretend its not a conference.
-        setConferenceState(false);
+        /* UNISOC: set conference state delay. @{
+         * @orig setConferenceState(false); */
+        setConferenceStateDelay(false);
+        /* @} */
 
         // Remove manage conference capability.
         mCouldManageConference = can(Connection.CAPABILITY_MANAGE_CONFERENCE);
@@ -975,6 +1031,31 @@ public class ImsConference extends Conference implements Holdable {
             connection.setConnectTimeMillis(participant.getConnectTime());
             connection.setConnectionStartElapsedRealTime(participant.getConnectElapsedTime());
         }
+        /* UNISOC: Ims conference calllog time & type refactor. @{ */
+        //connection.setConnectTimeMillis(parent.getConnectTimeMillis());
+        for (TelephonyConnection telephonyConnection : mMemberConnections) {
+            if (telephonyConnection != null
+                    && telephonyConnection.getOriginalConnection() != null
+                    && participant.getHandle() != null) {
+                if (TextUtils.equals(telephonyConnection.getIndex(),
+                        getIndexFromHandle(participant.getHandle().getSchemeSpecificPart()))) {
+                    if (parent.isImsConnection()) {
+                        long connectTime = System.currentTimeMillis()
+                                - telephonyConnection.getOriginalConnection().getDurationMillis();
+                        if (connection.getState() == Connection.STATE_DIALING) {
+                            connection.setConnectTimeMillis(telephonyConnection.getOriginalConnection()
+                                    .getConnectTime());
+                        } else {
+                            connection.setConnectTimeMillis(connectTime);
+                        }
+                        connection.setConnectionStartElapsedRealTime(telephonyConnection
+                                .getOriginalConnection().getConnectTimeReal());
+                        connection.setVideoState(telephonyConnection.getOriginalConnection().getVideoState());
+                    }
+                }
+            }
+        }
+        /* @} */
         // Indicate whether this is an MT or MO call to Telecom; the participant has the cached
         // data from the time of merge.
         connection.setCallDirection(participant.getCallDirection());
@@ -1021,11 +1102,16 @@ public class ImsConference extends Conference implements Holdable {
                 connection.removeConnectionListener(mParticipantListener);
                 // Mark disconnect cause as cancelled to ensure that the call is not logged in the
                 // call log.
-                connection.setDisconnected(new DisconnectCause(DisconnectCause.CANCELED));
+                /*UNISOC: add for VoLTE
+                 * @Orig:connection.setDisconnected(new DisconnectCause(DisconnectCause.CANCELED));
+                 * {*/
+                connection.setDisconnected(new DisconnectCause(DisconnectCause.LOCAL));
+                /*@}*/
                 mTelephonyConnectionService.removeConnection(connection);
                 connection.destroy();
             }
-            mConferenceParticipantConnections.clear();
+            // SPRD : Modify for ims conference calllog and elapsedTimeMillis.
+            // mConferenceParticipantConnections.clear();
         }
     }
 
@@ -1140,8 +1226,14 @@ public class ImsConference extends Conference implements Holdable {
                         c.getConnectionProperties() | Connection.PROPERTY_IS_DOWNGRADED_CONFERENCE);
                 c.updateState();
                 // Copy the connect time from the conferenceHost
+                /* UNISOC: Fix GsmConnection's connectTime is 0 after SRVCC. @{
                 c.setConnectTimeMillis(mConferenceHost.getConnectTimeMillis());
-                c.setConnectionStartElapsedRealTime(mConferenceHost.getConnectElapsedTimeMillis());
+                c.setConnectionStartElapsedRealTime(
+                        mConferenceHost.getOriginalConnection().getConnectTimeReal());*/
+                c.setConnectTimeMillis(mConferenceHost.getOriginalConnection().getConnectTime());
+                c.setConnectionStartElapsedRealTime(
+                        mConferenceHost.getOriginalConnection().getConnectTimeReal());
+                /* @} */
                 mTelephonyConnectionService.addExistingConnection(phoneAccountHandle, c);
                 mTelephonyConnectionService.addConnectionToConferenceController(c);
             } // CDMA case not applicable for SRVCC
@@ -1311,5 +1403,58 @@ public class ImsConference extends Conference implements Holdable {
     public boolean isFullConference() {
         return isMaximumConferenceSizeEnforced()
                 && getNumberOfParticipants() >= getMaximumConferenceSize();
+    }
+
+    // UNISOC: Ims conference calllog time & type refactor.
+    private String getIndexFromHandle(String number) {
+        if (TextUtils.isEmpty(number)) {
+            return null;
+        }
+        String index = null;
+        String [] numberParts = number.split("[@;:]");
+        if (numberParts.length < 2) {
+            return index;
+        }
+        index = numberParts[1];
+        return index;
+    }
+
+    /* UNISOC:add for bug1174883 @{ */
+    private boolean shouldUpdateSiglePartyConference(boolean isSinglePartyConference,
+            List<ConferenceParticipant> participants) {
+        if (mIsEmulatingSinglePartyCall && isSinglePartyConference) {
+            if (participants.size() == 1) {
+                String partyAddress = getAddressFromHandle(participants.get(0).getHandle());
+                if (!PhoneNumberUtils.compare(getAddress() != null? getAddress().getSchemeSpecificPart(): null,
+                        partyAddress)) {
+                    Log.i(this,"shouldUpdateSiglePartyConference  getAddress:" + getAddress());
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private String getAddressFromHandle(Uri handle) {
+        if (handle == null) {
+            return null;
+        }
+        if (TextUtils.isEmpty(handle.getSchemeSpecificPart())) {
+            return null;
+        }
+        String address = null;
+        String numberParts[] = handle.getSchemeSpecificPart().split("[@;:]");
+        if (numberParts.length == 0) {
+            return null;
+        }
+        address = numberParts[0];
+        return address;
+    }
+    /* @} */
+
+    //UNISOC: set conference state delay.
+    private void setConferenceStateDelay(boolean conferenceState) {
+        new Handler().postDelayed(() -> setConferenceState(conferenceState),
+                SET_CONFERENCE_STATE_DELAY_MS);
     }
 }

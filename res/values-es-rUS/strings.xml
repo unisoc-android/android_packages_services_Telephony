@@ -780,4 +780,6 @@
     <string name="supp_service_over_ut_precautions_dual_sim" msgid="1682814794340311300">"Para usar <xliff:g id="SUPP_SERVICE">%1$s</xliff:g>, asegúrate de que los datos móviles estén activados para la SIM <xliff:g id="SIM_NUMBER">%2$d</xliff:g>. Puedes cambiar esto en la configuración de la red móvil."</string>
     <string name="supp_service_over_ut_precautions_roaming_dual_sim" msgid="8062345092837168385">"Para usar <xliff:g id="SUPP_SERVICE">%1$s</xliff:g>, asegúrate de que los datos móviles y el roaming de datos estén activados para la SIM <xliff:g id="SIM_NUMBER">%2$d</xliff:g>. Puedes cambiar esto en la configuración de la red móvil."</string>
     <string name="supp_service_over_ut_precautions_dialog_dismiss" msgid="5061044213859557398">"Descartar"</string>
+    <string name="CallHold">Llamada en espera</string>
+    <string name="CallRetrieved">Llamada recuperada</string>
 </resources>

@@ -16,6 +16,8 @@
 
 package com.android.services.telephony;
 
+import android.content.Context;
+
 import android.telecom.Conference;
 import android.telecom.Connection;
 import android.telecom.PhoneAccountHandle;
@@ -23,6 +25,10 @@ import android.telecom.PhoneAccountHandle;
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallStateException;
 import com.android.internal.telephony.Phone;
+
+import com.android.phone.PhoneGlobals;
+import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManagerEx;
 
 import java.util.List;
 
@@ -148,10 +154,24 @@ public class TelephonyConference extends Conference implements Holdable {
         // If the conference was an IMS connection currently or before, disable MANAGE_CONFERENCE
         // as the default behavior. If there is a conference event package, this may be overridden.
         // If a conference event package was received, do not attempt to remove manage conference.
+        /* UNISOC: Show manage conference button even srvcc for cmcc. @{ */
+        CarrierConfigManager configManager = (CarrierConfigManager) PhoneGlobals.getInstance().getSystemService(
+                Context.CARRIER_CONFIG_SERVICE);
+        boolean showManageConference = false;
+
+        if (connection != null && connection instanceof TelephonyConnection &&
+                ((TelephonyConnection) connection).getPhone() != null &&
+                configManager.getConfigForSubId(((TelephonyConnection) connection).getPhone()
+                .getSubId()) != null) {
+            showManageConference = configManager.getConfigForSubId(
+                    ((TelephonyConnection) connection).getPhone().getSubId()).getBoolean(
+                    CarrierConfigManagerEx.KEY_MANAGE_CONFERENCE_EVEN_SRVCC);
+        }
         if (connection instanceof TelephonyConnection &&
-                ((TelephonyConnection) connection).wasImsConnection()) {
+                ((TelephonyConnection) connection).wasImsConnection() && !showManageConference) {
             removeCapability(Connection.CAPABILITY_MANAGE_CONFERENCE);
         }
+        /* @} */
     }
 
     @Override

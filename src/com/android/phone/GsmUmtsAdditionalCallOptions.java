@@ -12,6 +12,8 @@ import android.view.MenuItem;
 
 import com.android.internal.telephony.Phone;
 import com.android.phone.settings.SuppServicesUiUtil;
+import com.android.internal.telephony.PhoneConstants;
+import com.android.phone.settings.ActivityContainer;
 
 import java.util.ArrayList;
 
@@ -32,6 +34,8 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
     private int mInitIndex = 0;
     private Phone mPhone;
     private SubscriptionInfoHelper mSubscriptionInfoHelper;
+    // UNISOC: add for bug 1050878
+    private ActivityContainer mActivityContainer;
 
     private boolean mShowCLIRButton = true;
     private boolean mShowCWButton = true;
@@ -48,6 +52,12 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
         mSubscriptionInfoHelper.setActionBarTitle(
                 getActionBar(), getResources(), R.string.additional_gsm_call_settings_with_label);
         mPhone = mSubscriptionInfoHelper.getPhone();
+        // UNISOC: add for bug1045673
+        if(mPhone == null){
+            if (DBG) Log.d(LOG_TAG, "mPhone is null, finish it! ");
+            finish();
+            return;
+        }
 
         PreferenceScreen prefSet = getPreferenceScreen();
         mCLIRButton = (CLIRListPreference) prefSet.findPreference(BUTTON_CLIR_KEY);
@@ -66,10 +76,7 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
                     CarrierConfigManager.KEY_ADDITIONAL_SETTINGS_CALLER_ID_VISIBILITY_BOOL);
             mShowCWButton = b.getBoolean(
                     CarrierConfigManager.KEY_ADDITIONAL_SETTINGS_CALL_WAITING_VISIBILITY_BOOL);
-            mCLIROverUtPrecautions = mShowCLIRButton && b.getBoolean(
-                    CarrierConfigManager.KEY_CALLER_ID_OVER_UT_WARNING_BOOL);
-            mCWOverUtPrecautions = mShowCWButton && b.getBoolean(
-                    CarrierConfigManager.KEY_CALL_WAITING_OVER_UT_WARNING_BOOL);
+
             if (DBG) {
                 Log.d(LOG_TAG, "mCLIROverUtPrecautions:" + mCLIROverUtPrecautions
                         + ",mCWOverUtPrecautions:" + mCWOverUtPrecautions);
@@ -89,6 +96,12 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
                 prefSet.removePreference(mCLIRButton);
             }
         }
+
+        /* UNISOC: modify for CDMA @{ */
+        if (mPhone.getPhoneType() == PhoneConstants.PHONE_TYPE_CDMA) {
+            mShowCWButton = false;
+        }
+        /* @} */
 
         if (mCWButton != null) {
             if (mShowCWButton) {
@@ -111,6 +124,16 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
                 mInitIndex = mPreferences.size();
                 if (mShowCWButton && mCWButton != null && mCWButton.isEnabled()) {
                     mCWButton.init(this, true, mPhone);
+                    int[] cwArray = icicle.getIntArray(mCWButton.getKey());//UNISOC:add for bug952191
+                    if (cwArray != null) {
+                        if (DBG) {
+                            Log.d(LOG_TAG, "onCreate:  cwArray[0]="
+                                    + cwArray[0] + ", cwArray[1]=" + cwArray[1]);
+                        }
+                        mCWButton.handleGetCWResult(cwArray);
+                    } else {
+                        mCWButton.init(this, false, mPhone);
+                    }
                 }
                 if (mShowCLIRButton && mCLIRButton != null && mCLIRButton.isEnabled()) {
                     mCLIRButton.init(this, true, mPhone);
@@ -133,6 +156,11 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
             // android.R.id.home will be triggered in onOptionsItemSelected()
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
+        /* UNISOC: add for bug 1050878 @{ */
+        mActivityContainer = ActivityContainer.getInstance();
+        mActivityContainer.setApplication(getApplication());
+        mActivityContainer.addActivity(this, mPhone.getPhoneId());
+        /* @} */
     }
 
     @Override
@@ -179,7 +207,16 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
             mInitIndex = indexOfStartInit;
             doPreferenceInit(indexOfStartInit);
         }
+        // UNISOC: add for bug 1082916
+        mSubscriptionInfoHelper.addOnSubscriptionsChangedListener();
     }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        mSubscriptionInfoHelper.removeOnSubscriptionsChangedListener();
+    }
+    /* @} */
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
@@ -188,6 +225,11 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
         if (mShowCLIRButton && mCLIRButton.clirArray != null) {
             outState.putIntArray(mCLIRButton.getKey(), mCLIRButton.clirArray);
         }
+        /* UNISOC: add for bug952191 @{ */
+        if (mCWButton.mCWArray != null) {
+            outState.putIntArray(mCWButton.getKey(), mCWButton.mCWArray);
+        }
+        /* @} */
     }
 
     @Override
@@ -238,4 +280,14 @@ public class GsmUmtsAdditionalCallOptions extends TimeConsumingPreferenceActivit
         dismissDialogSafely(CW_WARNING_DIALOG);
         dismissDialogSafely(CALLER_ID_WARNING_DIALOG);
     }
+
+    /* UNISOC: add for bug 1050878 @{ */
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
+    }
+    /* @} */
 }

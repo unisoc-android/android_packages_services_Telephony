@@ -189,6 +189,11 @@ public class ConferenceParticipantConnection extends Connection {
         // The SubscriptionInfo reports ISO country codes in lower case.  Convert to upper case,
         // since ultimately we use this ISO when formatting the CEP phone number, and the phone
         // number formatting library expects uppercase ISO country codes.
+        /* UNISOC: Fix NPE when CountryIso is null. @{ */
+        if (subInfo.getCountryIso() == null) {
+            return null;
+        }
+        /* @} */
         return subInfo.getCountryIso().toUpperCase();
     }
 

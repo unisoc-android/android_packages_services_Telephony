@@ -17,11 +17,14 @@
 package com.android.phone.settings.fdn;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Context;
 import android.preference.EditTextPreference;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.util.AttributeSet;
 import android.view.View;
+import android.widget.EditText;
 
 import com.android.phone.R;
 
@@ -85,6 +88,19 @@ public class EditPinPreference extends EditTextPreference {
 
         // If the layout does not contain an edittext, hide the buttons.
         shouldHideButtons = (view.findViewById(android.R.id.edit) == null);
+        // UNISOC: modify for bug 900392
+        EditText editText = getEditText();
+        /* UNISOC: add for bug1122870 @{ */
+        editText.setTextDirection(View.TEXT_DIRECTION_LTR);
+        editText.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        /* @} */
+        /* UNISOC: add for FEATURE bug903647 @{ */
+        editText.setFocusable(true);
+        editText.setFocusableInTouchMode(true);
+        editText.requestFocus();
+        /* @} */
+        // UNISOC: modify for bug923739
+        editText.setFilters(new InputFilter[]{new InputFilter.LengthFilter(8)});
     }
 
     @Override
@@ -113,5 +129,12 @@ public class EditPinPreference extends EditTextPreference {
      */
     public void showPinDialog() {
         showDialog(null);
+    }
+
+    public void dismissDialog() {
+        Dialog dialog = getDialog();
+        if (dialog != null && dialog.isShowing()) {
+            dialog.dismiss();
+        }
     }
 }

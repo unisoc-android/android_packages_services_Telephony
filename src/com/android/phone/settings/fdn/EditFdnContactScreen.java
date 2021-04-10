@@ -16,6 +16,9 @@
 
 package com.android.phone.settings.fdn;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static android.view.Window.PROGRESS_VISIBILITY_OFF;
 import static android.view.Window.PROGRESS_VISIBILITY_ON;
 
@@ -23,14 +26,19 @@ import android.app.Activity;
 import android.content.AsyncQueryHandler;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.res.Resources;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.AsyncResult;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Message;
 import android.provider.ContactsContract.CommonDataKinds;
+import android.provider.Settings;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionManager;
 import android.text.Editable;
 import android.text.Selection;
 import android.text.Spannable;
@@ -48,17 +56,22 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.android.internal.telephony.EncodeException;
+import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
+import com.android.internal.telephony.GsmAlphabetEx;
 import com.android.phone.PhoneGlobals;
 import com.android.phone.R;
 import com.android.phone.SubscriptionInfoHelper;
+import com.android.phone.settings.ActivityContainer;
+import com.android.phone.settings.IccUriUtils;
 
 /**
  * Activity to let the user add or edit an FDN contact.
  */
 public class EditFdnContactScreen extends Activity {
     private static final String LOG_TAG = PhoneGlobals.LOG_TAG;
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
 
     // Menu item codes
     private static final int MENU_IMPORT = 1;
@@ -82,7 +95,19 @@ public class EditFdnContactScreen extends Activity {
     private LinearLayout mPinFieldContainer;
     private Button mButton;
 
+    /* UNISOC: edit for function FDN support. @{
+    ** origin
     private Handler mHandler = new Handler();
+    **/
+    private static final int EVENT_PIN2_ENTRY_COMPLETE = PIN2_REQUEST_CODE + 1;
+    private static final String FDN_UPDATE_ACTION = "android.callsettings.action.FDN_LIST_CHANGED";
+    private static final int RESULT_PIN2_TIMEOUT = PIN2_REQUEST_CODE + 2;
+    private Phone mPhone;
+    private int mRemainPin2Times = IccUriUtils.MAX_INPUT_TIMES;
+    /* }@ */
+
+    // SPRD: add for Bug 617999
+    private static final String INTENT_EXTRA_SUB_ID = "subid";
 
     /**
      * Constants used in importing from contacts
@@ -95,25 +120,56 @@ public class EditFdnContactScreen extends Activity {
     /** static intent to invoke phone number picker */
     private static final Intent CONTACT_IMPORT_INTENT;
     static {
-        CONTACT_IMPORT_INTENT = new Intent(Intent.ACTION_GET_CONTENT);
-        CONTACT_IMPORT_INTENT.setType(CommonDataKinds.Phone.CONTENT_ITEM_TYPE);
+        /* UNISOC: add for FEATURE bug900312 @{ */
+        CONTACT_IMPORT_INTENT = new Intent(Intent.ACTION_PICK);
+        CONTACT_IMPORT_INTENT.setType(CommonDataKinds.Phone.CONTENT_TYPE);
+        /* @} */
     }
     /** flag to track saving state */
     private boolean mDataBusy;
+    private Context mContext;
+
+    // UNISOC: modify by BUG 954072
+    private ActivityContainer mActivityContainer;
+    // UNISOC: modify by BUG 954072
+    private int mFdnNumberLimitLength;
 
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
         resolveIntent();
+        mContext = this;
 
         getWindow().requestFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
         setContentView(R.layout.edit_fdn_contact_screen);
         setupView();
         setTitle(mAddContact ? R.string.add_fdn_contact : R.string.edit_fdn_contact);
 
+        /* UNISOC: function FDN support. @{
+        ** origin
         displayProgress(false);
+        **/
+        mDataBusy = false;
+        int phoneId = mPhone.getPhoneId();
+        mRemainPin2Times = IccUriUtils.getInstance().getPIN2RemainTimes(getBaseContext(), phoneId);
+        /* }@ */
+
+        mFdnNumberLimitLength = SubscriptionManager.getResourcesForSubId(getBaseContext(), mPhone.getSubId())
+                .getInteger(R.integer.key_fdn_number_length);
+        /* UNISOC: modify by BUG 954072 @{ */
+        mActivityContainer = ActivityContainer.getInstance();
+        mActivityContainer.setApplication(getApplication());
+        mActivityContainer.addActivity(this, phoneId);
     }
+
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
+    }
+    /* @} */
 
     /**
      * We now want to bring up the pin request screen AFTER the
@@ -131,11 +187,16 @@ public class EditFdnContactScreen extends Activity {
                 Bundle extras = (intent != null) ? intent.getExtras() : null;
                 if (extras != null) {
                     mPin2 = extras.getString("pin2");
+                    /* UNISOC: function FDN support. @{
+                    ** origin
                     if (mAddContact) {
                         addContact();
                     } else {
                         updateContact();
                     }
+                    **/
+                    checkPin2(mPin2);
+                    /* }@ */
                 } else if (resultCode != RESULT_OK) {
                     // if they cancelled, then we just cancel too.
                     if (DBG) log("onActivityResult: cancelled.");
@@ -181,8 +242,12 @@ public class EditFdnContactScreen extends Activity {
         // Added the icons to the context menu
         menu.add(0, MENU_IMPORT, 0, r.getString(R.string.importToFDNfromContacts))
                 .setIcon(R.drawable.ic_menu_contact);
-        menu.add(0, MENU_DELETE, 0, r.getString(R.string.menu_delete))
+        /* SPRD: modify by BUG 741131 @{ */
+        if (!mAddContact) {
+            menu.add(0, MENU_DELETE, 0, r.getString(R.string.menu_delete))
                 .setIcon(android.R.drawable.ic_menu_delete);
+        }
+        /* @} */
         return true;
     }
 
@@ -221,11 +286,15 @@ public class EditFdnContactScreen extends Activity {
         Intent intent = getIntent();
 
         mSubscriptionInfoHelper = new SubscriptionInfoHelper(this, intent);
+        /* UNISOC: function FDN support. @{ */
+        if (mPhone == null) {
+            mPhone = mSubscriptionInfoHelper.getPhone();
+        }
+        /* }@ */
+        mName = intent.getStringExtra(INTENT_EXTRA_NAME);
+        mNumber = intent.getStringExtra(INTENT_EXTRA_NUMBER);
 
-        mName =  intent.getStringExtra(INTENT_EXTRA_NAME);
-        mNumber =  intent.getStringExtra(INTENT_EXTRA_NUMBER);
-
-        mAddContact = TextUtils.isEmpty(mNumber);
+        mAddContact = TextUtils.isEmpty(mNumber) && TextUtils.isEmpty(mName);
     }
 
     /**
@@ -240,6 +309,11 @@ public class EditFdnContactScreen extends Activity {
             mNameField.setOnFocusChangeListener(mOnFocusChangeHandler);
             mNameField.setOnClickListener(mClicked);
             mNameField.addTextChangedListener(mTextWatcher);
+            /* UNISOC: add for FEATURE bug903647 @{ */
+            mNameField.setFocusable(true);
+            mNameField.setFocusableInTouchMode(true);
+            mNameField.requestFocus();
+            /* @} */
         }
 
         mNumberField = (EditText) findViewById(R.id.fdn_number);
@@ -254,6 +328,8 @@ public class EditFdnContactScreen extends Activity {
         if (!mAddContact) {
             if (mNameField != null) {
                 mNameField.setText(mName);
+                // UNISOC: add for FEATURE bug903647
+                mNameField.setSelection(mNameField.getText().toString().length());
             }
             if (mNumberField != null) {
                 mNumberField.setText(mNumber);
@@ -297,17 +373,100 @@ public class EditFdnContactScreen extends Activity {
          return (number.length() <= 20) && (number.length() > 0);
      }
 
+     /**
+      * UNISOC: add for bug 516070 @{
+      *
+      * @param name
+      * @return true if name length is less than 14-digit limit
+      */
+     private boolean isValidName(String name) {
+         //add for unisoc 969193
+         int nameLength = getGsmAlphabetBytes(name);
+         return (nameLength <= 14);
+     }
+
+    //add for unisoc 969193
+    public  int  getGsmAlphabetBytes(String record) {
+        byte[] bytes = new byte[0];
+        int length = 0;
+        if (record == null) {
+            record = "";
+        }
+        try {
+            bytes = GsmAlphabetEx.stringToGsmAlphaSS(record);
+            length = bytes != null ? bytes.length : 0;
+        } catch (EncodeException e) {
+            try {
+                if (record != null) {
+                    bytes = record.getBytes("utf-16be");
+                }
+                //unisoc 973530 add length 1 for 0x80
+                length = bytes == null ? 0 :bytes.length +1;
+            } catch (Exception e1) {
+                e1.printStackTrace();
+            }
+        }
+        return length;
+     }
+
+     /* UNISOC: function FDN support. @{ */
+     private boolean isValidNumberOrTag(String number, String tag) {
+         String numberPlus = number;
+         if (TextUtils.isEmpty(number) && TextUtils.isEmpty(tag)) {
+             return false;
+         }
+          if (!TextUtils.isEmpty(number)) {
+            if (number.charAt(0) == '+') {
+                numberPlus = number.substring(1);
+            }
+        }
+        Log.d(LOG_TAG, "isValidNumberOrTag number:"+numberPlus);
+         if (!containDigit(numberPlus)) {
+             return false;
+         }
+         return true;
+     }
+
+     private boolean containDigit(String content) {
+         boolean flag = false;
+         /* UNISOC: add for bug908175 & bug884565 & 925031@{ */
+         content = content.replaceAll("\\s*", "");
+         Pattern p = Pattern.compile("[\\+]?[0-9\\p{P}+&&[^;]]+");
+         /* @} */
+         Matcher m = p.matcher(content);
+         if (m.matches()) {
+             flag = true;
+         }
+         return flag;
+     }
+     /* }@ */
 
     private void addContact() {
         if (DBG) log("addContact");
 
+        final String name = getNameFromTextField();
         final String number = PhoneNumberUtils.convertAndStrip(getNumberFromTextField());
 
-        if (!isValidNumber(number)) {
-            handleResult(false, true);
+        /* SPRD: add for bug 516070 @{ */
+        if (!isValidName(name)) {
+            handleResult(false, false, true);
             return;
         }
+        /* @} */
 
+        /* SPRD: add for bug689671 @{ */
+        if (!isValidNumber(mContext, number)) {
+            handleResult(false, true, false);
+            return;
+        }
+        /* @} */
+        /* SPRD: function FDN support. @{ */
+        if (mSubscriptionInfoHelper.getPhone().getSubId() < 0) {
+            log("addContact, Ignore add action for invliad subId(" +
+                    mSubscriptionInfoHelper.getSubId() + ")");
+            return;
+        }
+        /* }@ */
         Uri uri = FdnList.getContentUri(mSubscriptionInfoHelper);
 
         ContentValues bundle = new ContentValues(3);
@@ -327,10 +486,19 @@ public class EditFdnContactScreen extends Activity {
         final String name = getNameFromTextField();
         final String number = PhoneNumberUtils.convertAndStrip(getNumberFromTextField());
 
-        if (!isValidNumber(number)) {
-            handleResult(false, true);
+        /* SPRD: add for bug 516070 @{ */
+        if (!isValidName(name)) {
+            handleResult(false, false, true);
             return;
         }
+        /* @} */
+
+        /* SPRD: add for bug689671 @{ */
+        if (!isValidNumber(mContext, number)) {
+            handleResult(false, true, false);
+            return;
+        }
+        /* @} */
         Uri uri = FdnList.getContentUri(mSubscriptionInfoHelper);
 
         ContentValues bundle = new ContentValues();
@@ -364,6 +532,9 @@ public class EditFdnContactScreen extends Activity {
         Intent intent = new Intent();
         intent.setClass(this, GetPin2Screen.class);
         intent.setData(FdnList.getContentUri(mSubscriptionInfoHelper));
+        /* UNISOC: function FDN support. @{ */
+        intent.putExtra("times", mRemainPin2Times);
+        /* }@ */
         startActivityForResult(intent, PIN2_REQUEST_CODE);
     }
 
@@ -388,6 +559,54 @@ public class EditFdnContactScreen extends Activity {
                     .show();
         }
     }
+    /* SPRD: add for bug 516070 @{ */
+    private void handleResult(boolean success, boolean invalidNumber, boolean invalidName) {
+        if (success) {
+            if (DBG) {
+                log("handleResult: success!");
+            }
+            showStatus(getResources().getText(mAddContact ?
+                    R.string.fdn_contact_added : R.string.fdn_contact_updated));
+        } else {
+            if (DBG) {
+                log("handleResult: failed!");
+            }
+            if (invalidNumber) {
+                // UNISOC: add for FEATURE bug889286
+                showStatus(getResources().getString(R.string.fdn_invalid_number,
+                        mFdnNumberLimitLength));
+            } else if (invalidName) {
+                showStatus(getResources().getText(R.string.fdn_invalid_name));
+            } else {
+               /* SPRD: function FDN support. @{
+               ** origin
+               if (PhoneFactory.getDefaultPhone().getIccCard().getIccPin2Blocked()) {
+                    showStatus(getResources().getText(R.string.fdn_enable_puk2_requested));
+               } else if (PhoneFactory.getDefaultPhone().getIccCard().getIccPuk2Blocked()) {
+                    showStatus(getResources().getText(R.string.puk2_blocked));
+               }
+               **/
+                if (mPhone.getIccCard().getIccPin2Blocked()) {
+                    showStatus(getResources().getText(R.string.fdn_enable_puk2_requested));
+                } else if (mPhone.getIccCard().getIccPuk2Blocked()) {
+                    showStatus(getResources().getText(R.string.puk2_blocked));
+                }
+               /* }@ */
+                else {
+                    // There's no way to know whether the failure is due to incorrect PIN2 or
+                    // an inappropriate phone number.
+                    showStatus(getResources().getText(R.string.pin2_or_fdn_invalid));
+                }
+            }
+        }
+        mHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                finish();
+            }
+        }, 2000);
+    }
+    /* @} */
 
     private void handleResult(boolean success, boolean invalidNumber) {
         if (success) {
@@ -397,7 +616,9 @@ public class EditFdnContactScreen extends Activity {
         } else {
             if (DBG) log("handleResult: failed!");
             if (invalidNumber) {
-                showStatus(getResources().getText(R.string.fdn_invalid_number));
+                // UNISOC: add for FEATURE bug889286
+                showStatus(getResources().getString(R.string.fdn_invalid_number,
+                        mFdnNumberLimitLength));
             } else {
                if (PhoneFactory.getDefaultPhone().getIccCard().getIccPin2Blocked()) {
                     showStatus(getResources().getText(R.string.fdn_enable_puk2_requested));
@@ -428,13 +649,24 @@ public class EditFdnContactScreen extends Activity {
             }
 
             if (v == mNameField) {
-                mNumberField.requestFocus();
+                //add for unisoc 1017627
+                mButton.requestFocus();
             } else if (v == mNumberField) {
                 mButton.requestFocus();
             } else if (v == mButton) {
                 final String number = PhoneNumberUtils.convertAndStrip(getNumberFromTextField());
 
-                if (!isValidNumber(number)) {
+                /* UNISOC: add for FEATURE bug900501 @{ */
+                if (TextUtils.isEmpty(number)) {
+                    showToast(R.string.number_empty);
+                    return;
+                } else if (!isValidNumberOrTag(number.replaceAll(" ",""), "tag")) {
+                    showToast(R.string.callFailed_unobtainable_number);
+                    return;
+                }
+                /* @} */
+
+                if (!isValidNumber(mContext, number)) {
                     handleResult(false, true);
                     return;
                 }
@@ -484,14 +716,18 @@ public class EditFdnContactScreen extends Activity {
         protected void onInsertComplete(int token, Object cookie, Uri uri) {
             if (DBG) log("onInsertComplete");
             displayProgress(false);
-            handleResult(uri != null, false);
+            handleResult(uri != null, false, false);
+            // SPRD: add for Bug 617999
+            sendBroadcast();
         }
 
         @Override
         protected void onUpdateComplete(int token, Object cookie, int result) {
             if (DBG) log("onUpdateComplete");
             displayProgress(false);
-            handleResult(result > 0, false);
+            handleResult(result > 0, false, false);
+            // SPRD: add for Bug 617999
+            sendBroadcast();
         }
 
         @Override
@@ -499,7 +735,86 @@ public class EditFdnContactScreen extends Activity {
         }
     }
 
+    /* SPRD: add for Bug 617999 @{ */
+    private void sendBroadcast() {
+        Intent intent = new Intent(FDN_UPDATE_ACTION);
+        intent.putExtra(INTENT_EXTRA_SUB_ID, mSubscriptionInfoHelper.getSubId());
+        // SPRD: add for Bug712193
+        intent.addFlags(Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND);
+        sendBroadcast(intent);
+    }
+    /* @{ */
+
+    /* SPRD: function FDN support. @{ */
+    protected void checkPin2(String pin2) {
+        log("checkPin2: pin2 = " + pin2);
+
+        if (IccUriUtils.validatePin(pin2, false)) {
+            // get the relevant data for the icc call
+            boolean isEnabled = mPhone.getIccCard().getIccFdnEnabled();
+            log("toggleFDNEnable  isEnabled" + isEnabled);
+
+            Message onComplete = mHandler.obtainMessage(EVENT_PIN2_ENTRY_COMPLETE);
+            // make fdn request
+            // SPRD: modify for bug586544
+            mPhone.getIccCard().supplyPin2(pin2, onComplete);
+        } else {
+            // throw up error if the pin is invalid.
+            showStatus(getResources().getText(R.string.invalidPin2));
+        }
+    }
+
+    private Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                // when we are enabling FDN, either we are unsuccessful and
+                // display a toast, or just update the UI.
+                case EVENT_PIN2_ENTRY_COMPLETE:
+                    log(" EVENT_PIN2_ENTRY_COMPLETE");
+                    AsyncResult ar = (AsyncResult) msg.obj;
+                    if (ar.exception != null) {
+                        displayProgress(false);
+                        mRemainPin2Times -= 1;
+                        log(" EVENT_PIN2_ENTRY_COMPLETE remainTimesPIN2:" + mRemainPin2Times);
+                        if (mRemainPin2Times > 0) {
+                            showStatus(getResources().getText(R.string.pin2_invalid));
+                            authenticatePin2();
+                        } else {
+                            showStatus(getResources().getText(R.string.puk2_requested));
+                            setResult(RESULT_PIN2_TIMEOUT);
+                            finish();
+                        }
+                    } else {
+                        if (mAddContact) {
+                            addContact();
+                        } else {
+                            updateContact();
+                        }
+                    }
+                    break;
+            }
+        }
+    };
+    /* }@ */
+
+    private boolean isValidNumber(Context context, String number) {
+        /* UNISOC: add for FEATURE bug889286 @{ */
+        if (TextUtils.isEmpty(number)) {
+            return false;
+        } else {
+            return (number.length() <= mFdnNumberLimitLength);
+        }
+        /* @} */
+    }
+
     private void log(String msg) {
         Log.d(LOG_TAG, "[EditFdnContact] " + msg);
     }
+
+    /* UNISOC: add for FEATURE bug900501 @{ */
+    public void showToast(int stingId) {
+        Toast.makeText(EditFdnContactScreen.this, stingId, Toast.LENGTH_LONG).show();
+    }
+    /* @} */
 }

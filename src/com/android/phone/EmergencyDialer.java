@@ -23,6 +23,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.StatusBarManager;
 import android.app.WallpaperManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -77,10 +78,14 @@ import com.android.phone.EmergencyDialerMetricsLogger.UiModeErrorCode;
 import com.android.phone.common.dialpad.DialpadKeyButton;
 import com.android.phone.common.util.ViewUtil;
 import com.android.phone.common.widget.ResizingTextEditText;
-
+import com.android.internal.telephony.TelephonyIntents;
+import com.android.internal.telephony.IccCardConstants;
+import com.android.internal.telephony.IccCardConstants.State;
+import android.os.UserManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
 
 /**
  * EmergencyDialer is a special dialer that is used ONLY for dialing emergency calls.
@@ -174,6 +179,7 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
     private EmergencyActionGroup mEmergencyActionGroup;
 
     private EmergencyInfoGroup mEmergencyInfoGroup;
+    private PinEntryAlertDialog mPinEntryAlertDialog;
 
     // close activity when screen turns off
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
@@ -181,6 +187,15 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
         public void onReceive(Context context, Intent intent) {
             if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
                 finishAndRemoveTask();
+            //add for unisoc 1109445
+            } else if (TelephonyIntents.ACTION_SIM_STATE_CHANGED.equals(intent.getAction())) {
+                String simState = intent.getStringExtra(IccCardConstants.INTENT_KEY_ICC_STATE);
+                Log.d(LOG_TAG, "simState = " + simState);
+                if (IccCardConstants.INTENT_VALUE_ICC_ABSENT.equals(simState)) {
+                    if (mPinEntryAlertDialog != null) {
+                        mPinEntryAlertDialog.dismiss();
+                    }
+                }
             }
         }
     };
@@ -223,6 +238,8 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
     private ShortcutViewUtils.Config mShortcutViewConfig;
 
     private EmergencyDialerMetricsLogger mMetricsLogger;
+    // UNISOC : Modify for bug 939473
+    private StatusBarManager mStatusBarManager;
 
     @Override
     public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -245,11 +262,26 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
         //
         // So we call SpecialCharSequenceMgr.handleCharsForLockedDevice()
         // here, not the regular handleChars() method.
+        /* UNISOC: The emergency dial can only modify the PIN code of SIM1. @{ */
+        String dialString = PhoneNumberUtils.stripSeparators(input.toString());
+        if (TextUtils.isEmpty(dialString)) {
+            return;
+        }
+        SubscriptionManager subscriptionManager = SubscriptionManager.from(getApplicationContext());
+        int phoneCount = subscriptionManager.getActiveSubscriptionInfoCount();
+        UserManager userManager = (UserManager) getApplicationContext().getSystemService(Context.USER_SERVICE);
+        if (userManager.isSystemUser() && dialString.startsWith("**04") && dialString.endsWith("#") && phoneCount > 1) {
+            mPinEntryAlertDialog = new PinEntryAlertDialog();
+            Bundle args = new Bundle();
+            args.putString("input_message", dialString);
+            mPinEntryAlertDialog.setArguments(args);
+            mPinEntryAlertDialog.show(getFragmentManager(), "dialog");
+        }
+        /* @} */
         if (SpecialCharSequenceMgr.handleCharsForLockedDevice(this, input.toString(), this)) {
             // A special sequence was entered, clear the digits
             mDigits.getText().clear();
         }
-
         updateDialAndDeleteButtonStateEnabledAttr();
         updateTtsSpans();
     }
@@ -257,6 +289,8 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
+        // UNISOC : Modify for bug 939473
+        mStatusBarManager = (StatusBarManager) getSystemService(Context.STATUS_BAR_SERVICE);
 
         mMetricsLogger = new EmergencyDialerMetricsLogger(this);
 
@@ -360,10 +394,14 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
 
         final IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        intentFilter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
         registerReceiver(mBroadcastReceiver, intentFilter);
 
         mEmergencyActionGroup = (EmergencyActionGroup) findViewById(R.id.emergency_action_group);
-
+        //add for unisoc 1256844
+        if (!getSystemService(UserManager.class).isUserUnlocked()) {
+            mEmergencyActionGroup.setVisibility(View.GONE);
+        }
         mEmergencyInfoGroup = (EmergencyInfoGroup) findViewById(R.id.emergency_info_button);
 
         if (mShortcutViewConfig.isEnabled()) {
@@ -685,11 +723,20 @@ public class EmergencyDialer extends Activity implements View.OnClickListener,
             }
         }
 
+        // Disable the status bar and set the poke lock timeout to medium.
+        // There is no need to do anything with the wake lock.
+        if (DBG) Log.d(LOG_TAG, "disabling status bar, set to long timeout");
+        //UNISCO:add for bug1254938
+        mStatusBarManager.disable(StatusBarManager.DISABLE_EXPAND | StatusBarManager.DISABLE_RECENT);
         updateDialAndDeleteButtonStateEnabledAttr();
     }
 
     @Override
     public void onPause() {
+        // Reenable the status bar and set the poke lock timeout to default.
+        // There is no need to do anything with the wake lock.
+        if (DBG) Log.d(LOG_TAG, "reenabling status bar and closing the dialer");
+        mStatusBarManager.disable(StatusBarManager.DISABLE_NONE);
         super.onPause();
     }
 

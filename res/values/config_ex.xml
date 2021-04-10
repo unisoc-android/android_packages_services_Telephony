@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2009 The Android Open Source Project
+
+     Licensed under the Apache License, Version 2.0 (the "License");
+     you may not use this file except in compliance with the License.
+     You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+     Unless required by applicable law or agreed to in writing, software
+     distributed under the License is distributed on an "AS IS" BASIS,
+     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+     See the License for the specific language governing permissions and
+     limitations under the License.
+-->
+
+<!-- NOTE: Many variables that used to be in this file have been migrated to
+     CarrierConfigManager.java. Please consider whether new variables belong
+     there before adding to this file. Variables here should be more closely
+     related to devices than to networks. -->
+
+<!-- Phone app resources that may need to be customized
+     for different hardware or product builds. -->
+<resources>
+    <!--UNISOC: Feature porting for DM @{ -->
+    <bool name="config_dmyk_enable">false</bool>
+    <!--UNISOC: @} -->
+    <!-- Flag indicating whether tip turn off airplane message when make ECall -->
+    <bool name="config_tip_turn_off_airplane_mode">false</bool>
+    <!-- UNISOC: add for ussd customized feature 1072636 -->
+    <bool name="config_customized_ussd_layout">false</bool>
+    <!-- UNISOC: add for 1062548 -->
+    <integer name="config_dismiss_ussd_dialog_duration">90</integer>
+    <!--UNISOC: Feature porting, add for bug1072674 @{ -->
+    <bool name="config_support_tip_limited_number">false</bool>
+    <string-array name="config_checked_mccmnc" translatable="false">
+    </string-array>
+    <string-array name="config_checked_spn" translatable="false">
+    </string-array>
+    <string-array name="config_limited_number" translatable="false">
+    </string-array>
+    <!--  UNISOC: add for feature 1071416 durationforward -->
+    <bool name="config_show_durationforward">false</bool>
+    <bool name="config_video_callforward_support">true</bool>
+    <!-- UNISOC: Bug 1071722 -->
+    <bool name="config_display_ut_not_support_message_for_cdma">false</bool>
+    <!-- UNISOC: Add for Bug 1095038 @{ -->
+    <bool name="config_ut_need_query_root_node">false</bool>
+</resources>

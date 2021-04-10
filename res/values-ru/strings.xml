@@ -38,7 +38,7 @@
     <string name="audio_mode_bluetooth" msgid="3047641300848211128">"Bluetooth"</string>
     <string name="wait_prompt_str" msgid="7601815427707856238">"Отправить следующие тоны?\n"</string>
     <string name="pause_prompt_str" msgid="1789964702154314806">"Отправка тональных сигналов\n"</string>
-    <string name="send_button" msgid="4106860097497818751">"Позвонить"</string>
+    <string name="send_button" msgid="4106860097497818751">"ОТПРАВИТЬ"</string>
     <string name="pause_prompt_yes" msgid="3564467212025151797">"Да"</string>
     <string name="pause_prompt_no" msgid="6686238803236884877">"Нет"</string>
     <string name="wild_prompt_str" msgid="5543521676355533577">"Заменить универсальный символ на"</string>
@@ -238,7 +238,7 @@
     <string name="preferred_network_mode_lte_tdscdma_cdma_evdo_gsm_wcdma_summary" msgid="5596733053095592791">"Предпочтительный режим: LTE/TDSCDMA/CDMA/EvDo/GSM/WCDMA"</string>
     <string name="call_category" msgid="5863978196309462052">"Вызовы"</string>
     <string name="network_operator_category" msgid="4830701959205735636">"Сеть"</string>
-    <string name="enhanced_4g_lte_mode_title" msgid="522191650223239171">"Режим 4G LTE"</string>
+    <string name="enhanced_4g_lte_mode_title" msgid="522191650223239171">"Звонки VoLTE"</string>
     <!-- no translation found for enhanced_4g_lte_mode_title_variant:0 (4447454259719947406) -->
     <string name="enhanced_4g_lte_mode_summary" msgid="2332175070522125850">"Использовать сервисы LTE, чтобы улучшить качество связи (рекомендуется)"</string>
     <string name="enhanced_4g_lte_mode_summary_o2" msgid="2467813449068614988">"Использовать сервисы 4G, чтобы улучшить качество связи (рекомендуется)"</string>

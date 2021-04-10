@@ -30,6 +30,7 @@ import android.text.TextDirectionHeuristics;
 import android.text.TextUtils;
 import android.text.method.ArrowKeyMovementMethod;
 import android.text.method.DialerKeyListener;
+import android.text.InputFilter;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
@@ -89,7 +90,8 @@ public class EditPhoneNumberPreference extends EditTextPreference {
     //relevant (parsed) value of the mText
     private String mPhoneNumber;
     private boolean mChecked;
-
+    // UNISOC: add for bug904206
+    private static final int TEXT_LENGTH_MAX = 1024;
 
     /**
      * Interface for the dialog closed listener, related to
@@ -208,11 +210,26 @@ public class EditPhoneNumberPreference extends EditTextPreference {
                     mPhoneNumber = defaultNumber;
                 }
             }
+            /* UNISOC: add for bug904206 @{ */
+            InputFilter.LengthFilter lengthFilter = new InputFilter.LengthFilter(TEXT_LENGTH_MAX);
+            InputFilter[] inputFilter = { lengthFilter };
+            editText.setFilters(inputFilter);
+            /* @} */
             editText.setText(BidiFormatter.getInstance().unicodeWrap(
                     mPhoneNumber, TextDirectionHeuristics.LTR));
             editText.setMovementMethod(ArrowKeyMovementMethod.getInstance());
             editText.setKeyListener(DialerKeyListener.getInstance());
             editText.setOnFocusChangeListener(mDialogFocusChangeListener);
+            /* UNISOC: add for bug1154243 @{ */
+            editText.setTextDirection(View.TEXT_DIRECTION_LTR);
+            editText.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+            /* @} */
+            /* UNISOC: modify for bug900488 & 1128202@{ */
+            editText.setFocusable(true);
+            editText.setFocusableInTouchMode(true);
+            editText.requestFocus();
+            editText.setSelection(editText.getText().length());
+            /* @} */
         }
 
         //set contact picker
@@ -303,6 +320,12 @@ public class EditPhoneNumberPreference extends EditTextPreference {
         EditText editText = getEditText();
         if (editText != null) {
             editText.setText(pickedValue);
+            /* UNISOC: modify for bug 1165325@{ */
+            editText.setFocusable(true);
+            editText.setFocusableInTouchMode(true);
+            editText.requestFocus();
+            editText.setSelection(editText.getText().length());
+            /* @} */
         }
     }
 

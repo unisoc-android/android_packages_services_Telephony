@@ -21,10 +21,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.telephony.ServiceState;
+import android.telephony.TelephonyManager;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.internal.os.SomeArgs;
 import com.android.internal.telephony.Phone;
+import com.android.internal.telephony.PhoneFactory;
 
 /**
  * Helper class that listens to a Phone's radio state and sends an onComplete callback when we
@@ -173,7 +175,19 @@ public class RadioOnStateListener {
      * Callback to see if it is okay to call yet, given the current conditions.
      */
     private boolean isOkToCall(int serviceState) {
-        return (mCallback == null) ? false : mCallback.isOkToCall(mPhone, serviceState);
+        //UNISOC: add for bug1093959
+        //return (mCallback == null) ? false : mCallback.isOkToCall(mPhone, serviceState);
+        boolean anyPhoneIsOkToCall = false;
+        for (int i = 0; i < TelephonyManager.getDefault().getPhoneCount(); i++) {
+            Phone phone = PhoneFactory.getPhone(i);
+            if (phone == null) {
+                continue;
+            }
+            if (mCallback != null && mCallback.isOkToCall(phone, serviceState)) {
+                anyPhoneIsOkToCall = true;
+            }
+        }
+        return anyPhoneIsOkToCall;
     }
 
     /**

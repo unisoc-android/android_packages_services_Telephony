@@ -16,6 +16,7 @@
 
 package com.android.services.telephony;
 
+import android.app.LowmemoryUtils;
 import android.content.Context;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
@@ -34,6 +35,7 @@ import android.telecom.StatusHints;
 import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.CarrierConfigManager;
+import android.telephony.CarrierConfigManagerEx;
 import android.telephony.DisconnectCause;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.ServiceState;
@@ -43,6 +45,7 @@ import android.text.TextUtils;
 import android.util.Pair;
 
 import com.android.ims.ImsCall;
+import com.android.internal.os.SomeArgs;
 import com.android.internal.telephony.Call;
 import com.android.internal.telephony.CallFailCause;
 import com.android.internal.telephony.CallStateException;
@@ -68,6 +71,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+
 
 /**
  * Base class for CDMA and GSM connections.
@@ -98,6 +102,7 @@ abstract class TelephonyConnection extends Connection implements Holdable {
     private static final int MSG_CDMA_VOICE_PRIVACY_OFF = 16;
     private static final int MSG_HANGUP = 17;
     private static final int MSG_SET_CALL_RADIO_TECH = 18;
+    private static final int MSG_ON_CONNECTION_EVENT = 19;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -163,7 +168,11 @@ abstract class TelephonyConnection extends Connection implements Holdable {
                     if (msg.obj != null && ((AsyncResult) msg.obj).result != null) {
                         mSsNotification =
                                 (SuppServiceNotification)((AsyncResult) msg.obj).result;
-                        if (mOriginalConnection != null) {
+                        //UNISOC: notify when notification index match with connection index.
+                        if (mSsNotification.index == 0 || (mOriginalConnection != null
+                                && mOriginalConnection.getIndex() != null
+                                && (mSsNotification.index == Integer.valueOf(
+                                mOriginalConnection.getIndex())))) {
                             handleSuppServiceNotification(mSsNotification);
                         }
                     }
@@ -265,6 +274,15 @@ abstract class TelephonyConnection extends Connection implements Holdable {
                         updateConnectionProperties();
                         updateStatusHints();
                         refreshDisableAddCall();
+                    }
+                    break;
+                case MSG_ON_CONNECTION_EVENT:
+                    SomeArgs args = (SomeArgs) msg.obj;
+                    try {
+                        sendConnectionEvent((String) args.arg1, (Bundle) args.arg2);
+
+                    } finally {
+                        args.recycle();
                     }
                     break;
             }
@@ -554,7 +572,10 @@ abstract class TelephonyConnection extends Connection implements Holdable {
          */
         @Override
         public void onConnectionEvent(String event, Bundle extras) {
-            sendConnectionEvent(event, extras);
+            SomeArgs args = SomeArgs.obtain();
+            args.arg1 = event;
+            args.arg2 = extras;
+            mHandler.obtainMessage(MSG_ON_CONNECTION_EVENT, args).sendToTarget();
         }
 
         @Override
@@ -618,6 +639,8 @@ abstract class TelephonyConnection extends Connection implements Holdable {
     private RttTextStream mRttTextStream = null;
 
     private boolean mWasImsConnection;
+    // UNISOC: Ims conference calllog time & type refactor.
+    private String mIndex;
 
     /**
      * Tracks the multiparty state of the ImsCall so that changes in the bit state can be detected.
@@ -1051,6 +1074,12 @@ abstract class TelephonyConnection extends Connection implements Holdable {
         newCapabilities = applyConferenceTerminationCapabilities(newCapabilities);
         newCapabilities = changeBitmask(newCapabilities, CAPABILITY_SUPPORT_DEFLECT,
                 isImsConnection() && canDeflectImsCalls());
+         /*UNISOC: add for bug859329 @{*/
+        boolean isMtConference = mOriginalConnection == null ? false : mOriginalConnection.isMtMultiparty();
+        if (isMtConference) {
+            boolean supportRemoteVT = can(newCapabilities,CAPABILITY_SUPPORTS_VT_REMOTE_BIDIRECTIONAL) && isCarrierVideoConferencingSupported();
+            newCapabilities = changeBitmask(newCapabilities, CAPABILITY_SUPPORTS_VT_REMOTE_BIDIRECTIONAL,supportRemoteVT);
+        }/*@}*/
 
         if (getConnectionCapabilities() != newCapabilities) {
             setConnectionCapabilities(newCapabilities);
@@ -1089,6 +1118,12 @@ abstract class TelephonyConnection extends Connection implements Holdable {
         newProperties = changeBitmask(newProperties, PROPERTY_NETWORK_IDENTIFIED_EMERGENCY_CALL,
                 isNetworkIdentifiedEmergencyCall());
 
+        /* UNISOC: Add for MT conference call @{ */
+        boolean isMtConference = mOriginalConnection == null ? false : mOriginalConnection.isMtMultiparty();
+        newProperties = changeBitmask(newProperties, PROPERTY_IS_MT_CONFERENCE_CALL,
+                isMtConference);
+        /*@}*/
+
         if (getConnectionProperties() != newProperties) {
             setConnectionProperties(newProperties);
         }
@@ -1111,6 +1146,14 @@ abstract class TelephonyConnection extends Connection implements Holdable {
                 Log.v(this, "updateAddress, address changed");
                 if ((getConnectionProperties() & PROPERTY_IS_DOWNGRADED_CONFERENCE) != 0) {
                     address = null;
+                }
+
+                Phone phone = getPhone();
+                if (phone != null
+                        && phone.getPhoneType() == PhoneConstants.PHONE_TYPE_CDMA) {
+                    if (mOriginalConnection.getOrigDialString() != null) {
+                        address = getAddressFromNumber(mOriginalConnection.getOrigDialString());
+                    }
                 }
                 setAddress(address, presentation);
             }
@@ -1427,7 +1470,10 @@ abstract class TelephonyConnection extends Connection implements Holdable {
                     mOriginalConnection.hangup();
                 }
             } catch (CallStateException e) {
-                Log.e(this, e, "Call to Connection.hangup failed with exception");
+                if (e.getError() == android.telephony.DisconnectCause.IMS_ACCESS_BLOCKED) {//UNISOC:modify for bug1059611
+                    mHandler.sendMessageDelayed(mHandler.obtainMessage(MSG_HANGUP), 300);
+                 }
+                 Log.e(this, e, "Call to Connection.hangup failed with exception  e.getError: " + e.getError());
             }
         } else {
             if (getState() == STATE_DISCONNECTED) {
@@ -1642,6 +1688,9 @@ abstract class TelephonyConnection extends Connection implements Holdable {
                     setRinging();
                     break;
                 case DISCONNECTED:
+                    // UNISOC: kill-stop mechanism
+                    LowmemoryUtils.killStopFrontApp(LowmemoryUtils.KILL_CONT_STOPPED_APP);
+                    Log.i(this, " killStopFrontApp : KILL_CONT_STOPPED_APP");
                     if (shouldTreatAsEmergencyCall()
                             && (cause
                             == android.telephony.DisconnectCause.EMERGENCY_TEMP_FAILURE
@@ -1834,10 +1883,20 @@ abstract class TelephonyConnection extends Connection implements Holdable {
 
         // An IMS call cannot be individually disconnected or separated from its parent conference.
         // If the call was IMS, even if it hands over to GMS, these capabilities are not supported.
-        if (!mWasImsConnection) {
+        /* UNISOC: Show manage conference button even srvcc for cmcc. @{ */
+        CarrierConfigManager configManager = (CarrierConfigManager) PhoneGlobals.getInstance().getSystemService(
+                Context.CARRIER_CONFIG_SERVICE);
+        boolean showManageConference = false;
+
+        if (getPhone() != null && configManager.getConfigForSubId(getPhone().getSubId()) != null) {
+            showManageConference = configManager.getConfigForSubId(getPhone().getSubId()).getBoolean(
+                    CarrierConfigManagerEx.KEY_MANAGE_CONFERENCE_EVEN_SRVCC);
+        }
+        if (!mWasImsConnection || showManageConference) {
             currentCapabilities |= CAPABILITY_DISCONNECT_FROM_CONFERENCE;
             currentCapabilities |= CAPABILITY_SEPARATE_FROM_CONFERENCE;
         }
+        /* @} */
 
         return currentCapabilities;
     }
@@ -2283,6 +2342,19 @@ abstract class TelephonyConnection extends Connection implements Holdable {
         }
         return showOrigDialString;
     }
+
+    /* UNISOC: Ims conference calllog time & type refactor @{ */
+    public void setIndex (String index) {
+        if (index == null || index.equals("") || index.equals("0")) {
+            return;
+        }
+        mIndex = index;
+    }
+
+    public String getIndex () {
+        return mIndex;
+    }
+    /* @} */
 
     /**
      * Creates a string representation of this {@link TelephonyConnection}.  Primarily intended for

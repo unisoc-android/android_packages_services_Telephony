@@ -16,17 +16,21 @@
 
 package com.android.services.telephony;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.UserHandle;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
+import android.view.WindowManager;
 
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import com.android.phone.R;
 
 /**
  * Helper class that implements special behavior related to emergency calls or making phone calls
@@ -98,6 +102,12 @@ public class RadioOnHelper implements RadioOnStateListener.Callback {
         // off.
         if (Settings.Global.getInt(mContext.getContentResolver(),
                 Settings.Global.AIRPLANE_MODE_ON, 0) > 0) {
+            /* UNISOC:Telstra requirement. @{ */
+            if (mContext.getResources().getBoolean(R.bool.config_tip_turn_off_airplane_mode)) {
+                turnOffAirplaneModeForEcall();
+                return;
+            }
+            /* @} */
             Log.d(this, "==> Turning off airplane mode for emergency call.");
 
             // Change the system setting
@@ -131,4 +141,33 @@ public class RadioOnHelper implements RadioOnStateListener.Callback {
     public boolean isOkToCall(Phone phone, int serviceState) {
         return (mCallback == null) ? false : mCallback.isOkToCall(phone, serviceState);
     }
+
+    /* UNISOC:Telstra requirement. @{ */
+    private void turnOffAirplaneModeForEcall() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
+        builder.setTitle(R.string.emergency_call);
+        builder.setMessage(R.string.turn_off_airplane_mode_for_emergency_call);
+        builder.setPositiveButton(android.R.string.ok,
+                new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Log.d(this, "==> turnOffAirplaneModeForEcall.");
+
+                        // Change the system setting
+                        Settings.Global.putInt(mContext.getContentResolver(),
+                                Settings.Global.AIRPLANE_MODE_ON, 0);
+
+                        // Post the broadcast intend for change in airplane mode
+                        Intent intent = new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED);
+                        intent.putExtra("state", false);
+                        mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
+                    }
+                });
+        AlertDialog dialog = builder.create();
+        dialog.getWindow().setType(WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG);
+        dialog.setCanceledOnTouchOutside(false);
+        dialog.setCancelable(false);
+        dialog.show();
+    }
+    /* @} */
 }

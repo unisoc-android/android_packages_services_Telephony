@@ -26,6 +26,7 @@ import com.android.services.telephony.TelecomAccountRegistry;
  */
 public class PhoneApp extends Application {
     PhoneGlobals mPhoneGlobals;
+    PhoneGlobalsEx mPhoneGlobalsEx;
 
     public PhoneApp() {
     }
@@ -38,7 +39,13 @@ public class PhoneApp extends Application {
             mPhoneGlobals = new PhoneGlobals(this);
             mPhoneGlobals.onCreate();
 
+            // Unisoc: Add for extend Telephony
+            mPhoneGlobalsEx = new PhoneGlobalsEx(this);
+            mPhoneGlobalsEx.onCreate();
+
             TelecomAccountRegistry.getInstance(this).setupOnBoot();
+            // UNISOC: Add for Bug 1073231 control WFC showing via OMA request
+            OmaHelper.getInstance();
         }
     }
 }

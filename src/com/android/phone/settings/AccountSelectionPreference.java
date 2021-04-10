@@ -24,6 +24,8 @@ import android.preference.Preference;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 
@@ -47,6 +49,8 @@ public class AccountSelectionPreference extends ListPreference implements
     private String[] mEntryValues;
     private CharSequence[] mEntries;
     private boolean mShowSelectionInSummary = true;
+    // UNISOC: add for bug721464
+    private static final String LABEL_FLAG = "SIM ";
 
     public AccountSelectionPreference(Context context) {
         this(context, null);
@@ -72,10 +76,15 @@ public class AccountSelectionPreference extends ListPreference implements
             PhoneAccountHandle currentSelection,
             CharSequence nullSelectionString) {
 
+        // UNISOC: add for bug721464
+        TelephonyManager telephonyManager = (TelephonyManager) mContext
+                .getSystemService(Context.TELEPHONY_SERVICE);
         mAccounts = accountsList.toArray(new PhoneAccountHandle[accountsList.size()]);
         mEntryValues = new String[mAccounts.length + 1];
         mEntries = new CharSequence[mAccounts.length + 1];
 
+        // SPRD: add for bug709726
+        CharSequence[] origLabel = new CharSequence[mAccounts.length + 1];
         PackageManager pm = mContext.getPackageManager();
 
         int selectedIndex = mAccounts.length;  // Points to nullSelectionString by default
@@ -86,8 +95,35 @@ public class AccountSelectionPreference extends ListPreference implements
             if (label != null) {
                 label = pm.getUserBadgedLabel(label, mAccounts[i].getUserHandle());
             }
+            /* UNISOC: add for bug721464 @{ */
             boolean isSimAccount =
                     account.hasCapabilities(PhoneAccount.CAPABILITY_SIM_SUBSCRIPTION);
+            int subId = telephonyManager.getSubIdForPhoneAccount(telecomManager
+                    .getPhoneAccount(mAccounts[i]));
+            int phoneId = SubscriptionManager.getPhoneId(subId);
+            String simLabelPrefix = String.format(
+                    mContext.getResources().getString(R.string.sim_label),
+                    phoneId + 1);
+            String simLabel;
+            String nameToSet = LABEL_FLAG + Integer.toString(phoneId + 1);
+            if (TextUtils.equals(label, nameToSet)) {
+                simLabel = nameToSet;
+            } else {
+                simLabel = String.valueOf(simLabelPrefix + label);
+            }
+            origLabel[i] = (TextUtils.isEmpty(label) && isSimAccount)
+                    ? mContext.getString(R.string.phone_accounts_default_account_label)
+                    : simLabel;
+            /* @} */
+            /* SPRD: add for bug890644 @{*/
+            if (!TextUtils.isEmpty(label)) {
+                CharSequence target = "%";
+                CharSequence replacement = "%%";
+                if (label.toString().contains(target)) {
+                    label = label.toString().replace(target, replacement);
+                }
+            }
+            /* @} */
             mEntries[i] = (TextUtils.isEmpty(label) && isSimAccount)
                     ? mContext.getString(R.string.phone_accounts_default_account_label)
                     : String.valueOf(label);
@@ -99,8 +135,10 @@ public class AccountSelectionPreference extends ListPreference implements
         mEntryValues[i] = Integer.toString(i);
         mEntries[i] = nullSelectionString;
 
+        // SPRD: add for bug890644
+        origLabel[i] = nullSelectionString;
         setEntryValues(mEntryValues);
-        setEntries(mEntries);
+        setEntries(origLabel);
         setValueIndex(selectedIndex);
         if (mShowSelectionInSummary) {
             setSummary(mEntries[selectedIndex]);

@@ -52,9 +52,8 @@ public class CallBarringDeselectAllPreference extends EditPinPreference {
     protected void showDialog(Bundle state) {
         // Finds out if the password field should be shown or not.
         ImsPhone imsPhone = mPhone != null ? (ImsPhone) mPhone.getImsPhone() : null;
-        mShowPassword = !(imsPhone != null
-                && ((imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE)
-                        || imsPhone.isUtEnabled()));
+        //UNISOC: Modify for bug#1145363
+        mShowPassword = !(imsPhone != null && imsPhone.isUtEnabled());
 
         // Selects dialog message depending on if the password field is shown or not.
         setDialogMessage(getContext().getString(mShowPassword

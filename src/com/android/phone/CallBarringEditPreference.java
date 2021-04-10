@@ -257,9 +257,8 @@ public class CallBarringEditPreference extends EditPinPreference {
 
     private void setShowPassword() {
         ImsPhone imsPhone = mPhone != null ? (ImsPhone) mPhone.getImsPhone() : null;
-        mShowPassword = !(imsPhone != null
-                && ((imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE)
-                        || imsPhone.isUtEnabled()));
+        // UNISOC : modify for bug#1145363
+        mShowPassword = !(imsPhone != null && imsPhone.isUtEnabled());
     }
 
     @Override

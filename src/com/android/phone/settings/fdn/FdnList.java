@@ -27,17 +27,21 @@ import android.telecom.PhoneAccount;
 import android.telephony.CarrierConfigManager;
 import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.ListView;
 import android.widget.PopupMenu;
+import android.widget.Toast;
 
+import com.android.internal.telephony.uicc.IccConstants;
 import com.android.phone.ADNList;
 import com.android.phone.PhoneGlobals;
 import com.android.phone.R;
 import com.android.phone.SubscriptionInfoHelper;
+import com.android.phone.settings.ActivityContainer;
 
 /**
  * Fixed Dialing Number (FDN) List UI for the Phone app. FDN is a feature of the service provider
@@ -93,6 +97,14 @@ public class FdnList extends ADNList {
 
     private boolean mFdnDialDirectlySupported = false;
     private SelectionPopupMenu mPopup;
+    /* SPRD: function FDN support. @{ */
+    private static final String TAG = "FdnList";
+    private ActivityContainer mActivityContainer;
+    private int mSubId;
+    private static final int INVALIDE_SUBID = -1;
+    /* }@ */
+    // SPRD: add for bug728713
+    private int mRecordLength = 0;
 
     @Override
     public void onCreate(Bundle icicle) {
@@ -103,17 +115,41 @@ public class FdnList extends ADNList {
             // android.R.id.home will be triggered in onOptionsItemSelected()
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
-
         mSubscriptionInfoHelper = new SubscriptionInfoHelper(this, getIntent());
         mSubscriptionInfoHelper.setActionBarTitle(
                 getActionBar(), getResources(), R.string.fdn_list_with_label);
+        if (mSubscriptionInfoHelper.getPhone() == null) {
+            mSubId = INVALIDE_SUBID;
+        } else {
+            mSubId = mSubscriptionInfoHelper.getPhone().getSubId();
+        }
+        if (mSubId <= INVALIDE_SUBID) {
+            finish();
+        } else {
+            // SPRD: add for bug728713
+            querySingleRecord();
+            int phoneId = mSubscriptionInfoHelper.getPhone().getPhoneId();
+            mActivityContainer = ActivityContainer.getInstance();
+            mActivityContainer.setApplication(getApplication());
+            mActivityContainer.addActivity(this, phoneId);
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         mFdnDialDirectlySupported = getFdnDialDirectlySupported();
+        // UNISOC: add for bug 1083459
+        mSubscriptionInfoHelper.addOnSubscriptionsChangedListener();
     }
+
+    /* UNISOC: add for bug 1083459 @{ */
+    @Override
+    public void onPause() {
+        super.onPause();
+        mSubscriptionInfoHelper.removeOnSubscriptionsChangedListener();
+    }
+    /* @} */
 
     @Override
     protected void onStop() {
@@ -198,9 +234,18 @@ public class FdnList extends ADNList {
     }
 
     private void addContact() {
-        //If there is no INTENT_EXTRA_NAME provided, EditFdnContactScreen treats it as an "add".
-        Intent intent = mSubscriptionInfoHelper.getIntent(EditFdnContactScreen.class);
-        startActivity(intent);
+        Log.i("FdnList", "addContact: mRecordLength = "+mRecordLength + "mCursorCount = "+mCursorCount);
+        if (mRecordLength == 0) { //Unisoc:change for bug1209348
+            String message = String.valueOf(getResources().getText(R.string.wait_message));
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        } else if (mCursorCount >= mRecordLength) {
+            String message = String.valueOf(getResources().getText(R.string.adn_full));
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        } else {
+            //If there is no INTENT_EXTRA_NAME provided, EditFdnContactScreen treats it as an "add".
+            Intent intent = mSubscriptionInfoHelper.getIntent(EditFdnContactScreen.class);
+            startActivity(intent);
+        }
     }
 
     /**
@@ -253,7 +298,7 @@ public class FdnList extends ADNList {
             String number = mCursor.getString(NUMBER_COLUMN);
             if (!TextUtils.isEmpty(number)) {
                 Uri uri = Uri.fromParts(PhoneAccount.SCHEME_TEL, number, null);
-                final Intent intent = new Intent(Intent.ACTION_CALL_PRIVILEGED, uri);
+                final Intent intent = new Intent(Intent.ACTION_DIAL, uri);
                 startActivity(intent);
             }
         }
@@ -267,6 +312,36 @@ public class FdnList extends ADNList {
                 ? Uri.parse(FDN_CONTENT_PATH_WITH_SUB_ID + subscriptionInfoHelper.getSubId())
                 : FDN_CONTENT_URI;
     }
+
+    /* SPRD: add for bug645817 @{ */
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
+    }
+    /* @} */
+
+    /* SPRD: add for bug728713 @{ */
+    public void querySingleRecord() {
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    com.android.internal.telephony.IccPhoneBookInterfaceManager ipm
+                            = mSubscriptionInfoHelper.getPhone().getIccPhoneBookInterfaceManager();
+                    if (ipm != null) {
+                        int recordSizes[] = ipm.getAdnRecordsSize(IccConstants.EF_FDN);
+                        mRecordLength = recordSizes[2];
+                        Log.i("FdnList", "querySingleRecord:  mRecordLength = "+mRecordLength);
+                    }
+                } catch (Exception e) {
+                    Log.e("FdnList", "query record size error!" + e);
+                }
+            }
+        }.start();
+    }
+    /* @} */
 
     /*
      * Get the config of whether dialing FDN number from FDN list directly is supported

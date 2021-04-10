@@ -25,10 +25,12 @@ import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
+import android.util.Log;
 
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneFactory;
 
+import java.util.List;
 /**
  * Helper for manipulating intents or components with subscription-related information.
  *
@@ -44,11 +46,18 @@ public class SubscriptionInfoHelper {
     // Extra on intent containing the label of a subscription.
     private static final String SUB_LABEL_EXTRA =
             "com.android.phone.settings.SubscriptionInfoHelper.SubscriptionLabel";
+    private static final String LOG_TAG = "SubscriptionInfoHelper";
 
     private Context mContext;
 
     private int mSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     private String mSubLabel;
+    /* UNISOC: add for bug 1082937 @{ */
+    private SubscriptionManager mSubscriptionManager;
+    private ActionBar mActionBar;
+    private Resources mRes;
+    private int mResId;
+    /* @} */
 
     /**
      * Instantiates the helper, by extracting the subscription id and label from the intent.
@@ -63,7 +72,14 @@ public class SubscriptionInfoHelper {
         if (mSubId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
             mSubId = intent.getIntExtra(SUB_ID_EXTRA, SubscriptionManager.INVALID_SUBSCRIPTION_ID);
         }
-        mSubLabel = intent.getStringExtra(SUB_LABEL_EXTRA);
+        //UNISOC: add for bug #1024064
+        //mSubLabel = intent.getStringExtra(SUB_LABEL_EXTRA);
+        SubscriptionInfo subInfo = SubscriptionManager.from(mContext).getActiveSubscriptionInfo(mSubId);
+        if (subInfo != null) {
+            mSubLabel = subInfo.getDisplayName().toString();
+        }
+        // UNISOC: add for bug 1082937
+        mSubscriptionManager = SubscriptionManager.from(mContext);
     }
 
     /**
@@ -97,10 +113,11 @@ public class SubscriptionInfoHelper {
     /**
      * @return Phone object. If a subscription id exists, it returns the phone for the id.
      */
+    // UNISOC: modify for bug896038
     public Phone getPhone() {
         return hasSubId()
                 ? PhoneFactory.getPhone(SubscriptionManager.getPhoneId(mSubId))
-                : PhoneGlobals.getPhone();
+                : /*PhoneGlobals.getPhone()*/getDefaultPhone();
     }
 
     /**
@@ -111,6 +128,94 @@ public class SubscriptionInfoHelper {
      * If the subscription label does not exists, leave the existing title.
      */
     public void setActionBarTitle(ActionBar actionBar, Resources res, int resId) {
+        /* UNISOC: add for bug 1082937 @{ */
+        updateActionBarTitle(actionBar, res, resId);
+        mActionBar = actionBar;
+        mRes = res;
+        mResId = resId;
+        /* @} */
+    }
+
+    public boolean hasSubId() {
+        return mSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+    }
+
+    public int getSubId() {
+        return mSubId;
+    }
+
+    /* UNISOC: FEATURE_VOLTE_CALLFORWARD_OPTIONS @{ */
+    public Intent getCallSettingsIntent(Class newActivityClass, Intent intent) {
+        if (hasSubId()) {
+            intent.putExtra(SUB_ID_EXTRA, mSubId);
+        }
+        if (!TextUtils.isEmpty(mSubLabel)) {
+            intent.putExtra(SUB_LABEL_EXTRA, mSubLabel);
+        }
+        if (mContext.getPackageManager().resolveActivity(intent, 0) == null) {
+            Log.i(LOG_TAG, intent + " is not exist");
+            if (newActivityClass == null) {
+                return null;
+            }
+            intent.setClass(mContext, newActivityClass);
+        }
+        return intent;
+    }
+
+    public boolean isShowIPFeature(){
+        return mContext.getResources().getBoolean(com.android.internal.R.bool.ip_dial_enabled_bool);
+    }
+    /* @} */
+
+    /* UNISOC: add for bug896038 @{ */
+    private Phone getDefaultPhone() {
+        Phone phone = PhoneGlobals.getPhone();
+        List<SubscriptionInfo> subList = SubscriptionManager.from(mContext)
+                .getActiveSubscriptionInfoList();
+        if (subList != null && subList.size() == 1) {
+            phone = PhoneFactory.getPhone(subList.get(0).getSimSlotIndex());
+        }
+        Log.i(LOG_TAG, "phone slot : " + phone.getPhoneId() + " sub id : " + phone.getSubId());
+        return phone;
+    }
+    /* @} */
+    /* UNISOC: add for bug 1082937 @{ */
+    private final SubscriptionManager.OnSubscriptionsChangedListener mOnSubscriptionsChangeListener
+            = new SubscriptionManager.OnSubscriptionsChangedListener() {
+        @Override
+        public void onSubscriptionsChanged() {
+            Log.d(LOG_TAG,"onSubscriptionsChanged:");
+            List<SubscriptionInfo> subscriptions = mSubscriptionManager
+                    .getActiveSubscriptionInfoList();
+            if (subscriptions != null) {
+                int subscriptionsLength = subscriptions.size();
+                for (int i = 0; i < subscriptionsLength; i++) {
+                    SubscriptionInfo subscriptionInfo = subscriptions.get(i);
+                    Log.d(LOG_TAG,"subscriptionInfo = "+subscriptionInfo+ ", i = "+i);
+                    if (subscriptionInfo != null) {
+                        int subId = subscriptionInfo.getSubscriptionId();
+                        if (mSubId == subId) {
+                            String displayName = subscriptionInfo.getDisplayName().toString();
+                            if (mSubLabel == null || !mSubLabel.equals(displayName)) {
+                                mSubLabel = displayName;
+                                updateActionBarTitle(mActionBar, mRes, mResId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    public void addOnSubscriptionsChangedListener() {
+        mSubscriptionManager.addOnSubscriptionsChangedListener(mOnSubscriptionsChangeListener);
+    }
+
+    public void removeOnSubscriptionsChangedListener(){
+        mSubscriptionManager.removeOnSubscriptionsChangedListener(mOnSubscriptionsChangeListener);
+    }
+
+    private void updateActionBarTitle(ActionBar actionBar, Resources res, int resId) {
         if (actionBar == null || TextUtils.isEmpty(mSubLabel)) {
             return;
         }
@@ -122,12 +227,5 @@ public class SubscriptionInfoHelper {
         String title = String.format(res.getString(resId), mSubLabel);
         actionBar.setTitle(title);
     }
-
-    public boolean hasSubId() {
-        return mSubId != SubscriptionManager.INVALID_SUBSCRIPTION_ID;
-    }
-
-    public int getSubId() {
-        return mSubId;
-    }
+    /* @} */
 }

@@ -18,24 +18,34 @@ package com.android.phone.settings.fdn;
 
 import android.app.ActionBar;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
+import android.content.Intent;
 import android.os.AsyncResult;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.os.UserManager;
+import android.telephony.TelephonyManager;
+import android.util.Log;
+import android.preference.Preference;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceScreen;
 import android.util.Log;
+import android.provider.Settings;
 import android.view.MenuItem;
 import android.view.WindowManager;
 import android.widget.Toast;
 
 import com.android.internal.telephony.CommandException;
 import com.android.internal.telephony.Phone;
+import com.android.internal.telephony.SubscriptionController;
 import com.android.phone.CallFeaturesSetting;
 import com.android.phone.PhoneGlobals;
 import com.android.phone.R;
 import com.android.phone.SubscriptionInfoHelper;
+import com.android.phone.settings.ActivityContainer;
+import com.android.phone.settings.IccUriUtils;
 
 /**
  * FDN settings UI for the Phone app.
@@ -45,7 +55,7 @@ public class FdnSetting extends PreferenceActivity
         implements EditPinPreference.OnPinEnteredListener, DialogInterface.OnCancelListener {
 
     private static final String LOG_TAG = PhoneGlobals.LOG_TAG;
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
 
     private SubscriptionInfoHelper mSubscriptionInfoHelper;
     private Phone mPhone;
@@ -88,6 +98,16 @@ public class FdnSetting extends PreferenceActivity
     // size limits for the pin.
     private static final int MIN_PIN_LENGTH = 4;
     private static final int MAX_PIN_LENGTH = 8;
+
+    private int mRemainPin2Times = 0;
+    private int mRemainPuk2Times = 0;
+    private PreferenceScreen mButtonFdnList;
+    private static final String FDN_STATUS_CHANGED = "android.callsettings.action.FDN_STATUS_CHANGED";
+    private static final String NUM_PIN2_REMAIN_TIMES = "num_pin2_remain_times_key";
+    private static final String NUM_PUK2_REMAIN_TIMES = "num_puk2_remain_times_key";
+    private static final String INTENT_EXTRA_SUB_ID = "subid";
+    private ActivityContainer mActivityContainer;
+    private TelephonyManager mTeleMgr;
 
     /**
      * Delegate to the respective handlers.
@@ -248,6 +268,13 @@ public class FdnSetting extends PreferenceActivity
                 case EVENT_PIN2_ENTRY_COMPLETE: {
                         AsyncResult ar = (AsyncResult) msg.obj;
                         if (ar.exception != null) {
+                            updateRemainTimes();
+                            if (DBG) {
+                                log("[Subscription: +" + mSubscriptionInfoHelper.getSubId() +
+                                        "]: handle EVENT_PIN2_ENTRY_COMPLETE: pin2 = " +
+                                        mRemainPin2Times + ", puk2 = " + mRemainPuk2Times
+                                        + ", ar.exception:" + ar.exception);
+                            }
                             if (ar.exception instanceof CommandException) {
                                 int attemptsRemaining = msg.arg1;
                                 // see if PUK2 is requested and alert the user accordingly.
@@ -258,11 +285,15 @@ public class FdnSetting extends PreferenceActivity
                                         // make sure we set the PUK2 state so that we can skip
                                         // some redundant behaviour.
                                         displayMessage(R.string.fdn_enable_puk2_requested,
-                                                attemptsRemaining);
-                                        resetPinChangeStateForPUK2();
+                                                mRemainPuk2Times);
                                         break;
                                     case PASSWORD_INCORRECT:
-                                        displayMessage(R.string.pin2_invalid, attemptsRemaining);
+                                        if (mRemainPin2Times > 0) {
+                                            displayMessage(R.string.pin2_invalid, mRemainPin2Times);
+                                            resetPinChangeState();
+                                        } else {
+                                            displayMessage(R.string.fdn_enable_puk2_requested);
+                                        }
                                         break;
                                     default:
                                         displayMessage(R.string.fdn_failed, attemptsRemaining);
@@ -271,6 +302,11 @@ public class FdnSetting extends PreferenceActivity
                             } else {
                                 displayMessage(R.string.pin2_error_exception);
                             }
+                            if (mRemainPin2Times <= 0) {
+                                resetPinChangeStateForPUK2();
+                            }
+                        } else {
+                            mRemainPin2Times = IccUriUtils.MAX_INPUT_TIMES;
                         }
                         updateEnableFDN();
                     }
@@ -283,6 +319,7 @@ public class FdnSetting extends PreferenceActivity
                         if (DBG)
                             log("Handle EVENT_PIN2_CHANGE_COMPLETE");
                         AsyncResult ar = (AsyncResult) msg.obj;
+                        updateRemainTimes();
                         if (ar.exception != null) {
                             if (ar.exception instanceof CommandException) {
                                 int attemptsRemaining = msg.arg1;
@@ -313,12 +350,25 @@ public class FdnSetting extends PreferenceActivity
                                 } else {
                                     // set the correct error message depending upon the state.
                                     // Reset the state depending upon or knowledge of the PUK state.
-                                    if (!mIsPuk2Locked) {
+                                    /*if (!mIsPuk2Locked) {
                                         displayMessage(R.string.badPin2, attemptsRemaining);
                                         resetPinChangeState();
                                     } else {
                                         displayMessage(R.string.badPuk2, attemptsRemaining);
                                         resetPinChangeStateForPUK2();
+                                    }*/
+                                    if (mRemainPin2Times > 0) {
+                                        displayMessage(R.string.badPin2, mRemainPin2Times);
+                                        resetPinChangeState();
+                                    } else {
+                                        if (mRemainPuk2Times < 1) {
+                                            displayMessage(R.string.puk2_blocked);
+                                        } else {
+                                            displayMessage(mIsPuk2Locked ?
+                                                    R.string.badPuk2 : R.string.puk2_requested,
+                                                    mRemainPuk2Times);
+                                            resetPinChangeStateForPUK2();
+                                        }
                                     }
                                 }
                             } else {
@@ -328,12 +378,14 @@ public class FdnSetting extends PreferenceActivity
                             if (mPinChangeState == PIN_CHANGE_PUK) {
                                 displayMessage(R.string.pin2_unblocked);
                             } else {
+                                updateRemainTimes();
                                 displayMessage(R.string.pin2_changed);
                             }
 
                             // reset to normal behaviour on successful change.
                             resetPinChangeState();
                         }
+                        updateEnableFDN();
                     }
                     break;
             }
@@ -382,7 +434,8 @@ public class FdnSetting extends PreferenceActivity
         int msgId;
         switch (mPinChangeState) {
             case PIN_CHANGE_OLD:
-                msgId = R.string.oldPin2Label;
+                //msgId = R.string.oldPin2Label;
+                msgId = R.string.oldPin2_Label;
                 break;
             case PIN_CHANGE_NEW:
             case PIN_CHANGE_NEW_PIN_FOR_PUK:
@@ -394,16 +447,24 @@ public class FdnSetting extends PreferenceActivity
                 break;
             case PIN_CHANGE_PUK:
             default:
-                msgId = R.string.label_puk2_code;
+                //msgId = R.string.label_puk2_code;
+                msgId = R.string.puk2_code_label;
                 break;
         }
 
         // append the note / additional message, if needed.
-        if (strId != 0) {
+        /*if (strId != 0) {
             mButtonChangePin2.setDialogMessage(getText(msgId) + "\n" + getText(strId));
         } else {
             mButtonChangePin2.setDialogMessage(msgId);
+        }*/
+        String msgStr = getString(msgId, mRemainPin2Times > 0 ? mRemainPin2Times : mRemainPuk2Times);
+        if (strId != 0) {
+            mButtonChangePin2.setDialogMessage(msgStr + "\n" + getText(strId));
+        } else {
+            mButtonChangePin2.setDialogMessage(msgStr);
         }
+        /* }@ */
 
         // only display if requested.
         if (shouldDisplay) {
@@ -466,6 +527,54 @@ public class FdnSetting extends PreferenceActivity
             mButtonEnableFDN.setSummary(R.string.fdn_disabled);
             mButtonEnableFDN.setDialogTitle(R.string.enable_fdn);
         }
+        Intent intent = new Intent(FDN_STATUS_CHANGED);
+        intent.putExtra(INTENT_EXTRA_SUB_ID, mSubscriptionInfoHelper.getSubId());
+        sendBroadcast(intent);
+        int simState = mTeleMgr.getSimState(mPhone.getPhoneId());
+        // SPRD: modify for bug685112
+        if (!isAirplaneModeOn(getBaseContext())
+                && (simState == TelephonyManager.SIM_STATE_READY)) {
+            if (mRemainPuk2Times > 0) {
+                if (mRemainPin2Times > 0) {
+                    mButtonChangePin2.setTitle(R.string.change_pin2);
+                    mButtonChangePin2.setSummary(R.string.sum_fdn_change_pin);
+                } else {
+                    mButtonChangePin2.setTitle(R.string.unblock_pin2);
+                    mButtonChangePin2.setSummary(R.string.sum_fdn_unblock_pin2);
+                }
+                mButtonChangePin2.setEnabled(true);
+            } else {
+                mButtonChangePin2.setSummary(R.string.puk2_blocked);
+                mButtonChangePin2.setEnabled(false);
+            }
+            if (mRemainPin2Times > 0) {
+                mButtonEnableFDN.setDialogMessage(getString(
+                        R.string.pin2_Label,
+                        mRemainPin2Times));
+                mButtonChangePin2.setDialogTitle(R.string.change_pin2);
+                mButtonChangePin2.setDialogMessage(getString(
+                        R.string.oldPin2_Label,
+                        mRemainPin2Times));
+                mButtonEnableFDN.setEnabled(true);
+                mButtonFdnList.setEnabled(true);
+
+            } else {
+                mButtonChangePin2.setDialogTitle(R.string.unblock_pin2);
+                mButtonChangePin2.setDialogMessage(getString(
+                        R.string.puk2_code_label,
+                        mRemainPuk2Times));
+                mButtonEnableFDN.setEnabled(false);
+                mIsPuk2Locked = true;
+                mButtonFdnList.setEnabled(false);
+            }
+        } else {
+            mButtonChangePin2.setEnabled(false);
+            mButtonEnableFDN.setEnabled(false);
+            // SPRD: Add for Bug 463703
+            mButtonFdnList.setEnabled(false);
+            mButtonEnableFDN.dismissDialog();
+            mButtonChangePin2.dismissDialog();
+        }
     }
 
     /**
@@ -486,8 +595,17 @@ public class FdnSetting extends PreferenceActivity
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
 
+        if (!isPrimaryUser()) {
+            Toast.makeText(this,
+                    R.string.call_settings_admin_user_only, Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
         mSubscriptionInfoHelper = new SubscriptionInfoHelper(this, getIntent());
         mPhone = mSubscriptionInfoHelper.getPhone();
+
+        mTeleMgr = (TelephonyManager) this.getSystemService(Context.TELEPHONY_SERVICE);
 
         addPreferencesFromResource(R.xml.fdn_setting);
 
@@ -498,24 +616,38 @@ public class FdnSetting extends PreferenceActivity
 
         //assign click listener and update state
         mButtonEnableFDN.setOnPinEnteredListener(this);
-        updateEnableFDN();
+        //updateEnableFDN();
 
         mButtonChangePin2.setOnPinEnteredListener(this);
 
-        PreferenceScreen fdnListPref =
+/*        PreferenceScreen fdnListPref =
                 (PreferenceScreen) prefSet.findPreference(FDN_LIST_PREF_SCREEN_KEY);
-        fdnListPref.setIntent(mSubscriptionInfoHelper.getIntent(FdnList.class));
+        fdnListPref.setIntent(mSubscriptionInfoHelper.getIntent(FdnList.class));*/
+        mButtonFdnList = (PreferenceScreen) prefSet.findPreference(FDN_LIST_PREF_SCREEN_KEY);
+        mButtonFdnList.setIntent(mSubscriptionInfoHelper.getIntent(FdnList.class));
 
         // Only reset the pin change dialog if we're not in the middle of changing it.
         if (icicle == null) {
-            resetPinChangeState();
+            /* UNISOC: modify for bug905582 @{ */
+            if (mPhone != null) {
+                //resetPinChangeState();
+                updateRemainTimes();
+                if (mRemainPin2Times > 0) {
+                    resetPinChangeState();
+                } else {
+                    resetPinChangeStateForPUK2();
+                }
+            }
+            /* @} */
         } else {
             mIsPuk2Locked = icicle.getBoolean(SKIP_OLD_PIN_KEY);
             mPinChangeState = icicle.getInt(PIN_CHANGE_STATE_KEY);
             mOldPin = icicle.getString(OLD_PIN_KEY);
             mNewPin = icicle.getString(NEW_PIN_KEY);
-            mButtonChangePin2.setDialogMessage(icicle.getString(DIALOG_MESSAGE_KEY));
-            mButtonChangePin2.setText(icicle.getString(DIALOG_PIN_ENTRY_KEY));
+            //mButtonChangePin2.setDialogMessage(icicle.getString(DIALOG_MESSAGE_KEY));
+            //mButtonChangePin2.setText(icicle.getString(DIALOG_PIN_ENTRY_KEY));
+            mRemainPin2Times = icicle.getInt(NUM_PIN2_REMAIN_TIMES);
+            mRemainPuk2Times = icicle.getInt(NUM_PUK2_REMAIN_TIMES);
         }
 
         ActionBar actionBar = getActionBar();
@@ -525,14 +657,52 @@ public class FdnSetting extends PreferenceActivity
             mSubscriptionInfoHelper.setActionBarTitle(
                     actionBar, getResources(), R.string.fdn_with_label);
         }
+        if (mPhone == null) {
+            prefSet.setEnabled(false);
+        } else {
+            updateEnableFDN();
+            mActivityContainer = ActivityContainer.getInstance();
+            mActivityContainer.setApplication(getApplication());
+            // UNISOC: modify for bug 954072 and bug980192
+            mActivityContainer.addActivity(this, mPhone.getPhoneId());
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         mPhone = mSubscriptionInfoHelper.getPhone();
-        updateEnableFDN();
-        updateChangePIN2();
+        /* UNISOC: modify for bug905582 @{ */
+        if (mPhone == null) {
+            getPreferenceScreen().setEnabled(false);
+        } else {
+            getPreferenceScreen().setEnabled(true);
+            updateRemainTimes();
+            if (mRemainPin2Times <= 0) {
+                resetPinChangeStateForPUK2();
+            } else {
+                resetPinChangeState();
+            }
+            updateEnableFDN();
+        }
+        /* @} */
+        // UNISOC: add for bug 1082899
+        mSubscriptionInfoHelper.addOnSubscriptionsChangedListener();
+    }
+
+    /* UNISOC: add for bug 1082899 @{ */
+    @Override
+    public void onPause() {
+        super.onPause();
+        mSubscriptionInfoHelper.removeOnSubscriptionsChangedListener();
+    }
+    /* @} */
+
+    protected void onDestroy() {
+        super.onDestroy();
+        if (mActivityContainer != null) {
+            mActivityContainer.removeActivity(this);
+        }
     }
 
     /**
@@ -545,8 +715,10 @@ public class FdnSetting extends PreferenceActivity
         out.putInt(PIN_CHANGE_STATE_KEY, mPinChangeState);
         out.putString(OLD_PIN_KEY, mOldPin);
         out.putString(NEW_PIN_KEY, mNewPin);
-        out.putString(DIALOG_MESSAGE_KEY, mButtonChangePin2.getDialogMessage().toString());
-        out.putString(DIALOG_PIN_ENTRY_KEY, mButtonChangePin2.getText());
+        //out.putString(DIALOG_MESSAGE_KEY, mButtonChangePin2.getDialogMessage().toString());
+        //out.putString(DIALOG_PIN_ENTRY_KEY, mButtonChangePin2.getText());
+        out.putInt(NUM_PIN2_REMAIN_TIMES, mRemainPin2Times);
+        out.putInt(NUM_PUK2_REMAIN_TIMES, mRemainPuk2Times);
     }
 
     @Override
@@ -557,6 +729,57 @@ public class FdnSetting extends PreferenceActivity
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        mButtonEnableFDN.dismissDialog();
+        mButtonChangePin2.dismissDialog();
+        mSubscriptionInfoHelper = new SubscriptionInfoHelper(this, intent);
+        mPhone = mSubscriptionInfoHelper.getPhone();
+        ActionBar actionBar = getActionBar();
+        if (actionBar != null) {
+            mSubscriptionInfoHelper.setActionBarTitle(
+                    actionBar, getResources(), R.string.fdn_with_label);
+        }
+        if (mButtonFdnList != null) {
+            mButtonFdnList.setIntent(mSubscriptionInfoHelper.getIntent(FdnList.class));
+        }
+    }
+
+    @Override
+    public void onMultiWindowModeChanged(boolean isInMultiWindowMode) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode);
+        if(mButtonChangePin2 != null) {
+            mButtonChangePin2.dismissDialog();
+        }
+    }
+
+    private boolean isPrimaryUser() {
+        return getSystemService(UserManager.class).isSystemUser();
+    }
+
+    public void updateRemainTimes() {
+        int phoneId = mPhone.getPhoneId();
+        mRemainPin2Times = IccUriUtils.getInstance().getPIN2RemainTimes(getBaseContext(), phoneId);
+        if (DBG) {
+            log("[Subscription: +" + mSubscriptionInfoHelper.getSubId() +
+                    "]: updateRemainTimes: pin2 = " + mRemainPin2Times);
+        }
+        mRemainPuk2Times = IccUriUtils.getInstance().getPUK2RemainTimes(getBaseContext(), phoneId);
+        if (DBG) {
+            log("[Subscription: +" + mSubscriptionInfoHelper.getSubId() +
+                    "]: updateRemainTimes: puk2 = " + mRemainPuk2Times);
+        }
+    }
+
+    private boolean isAirplaneModeOn(Context context) {
+        if (context == null) {
+            return true;
+        }
+        return Settings.System.getInt(context.getContentResolver(),
+                Settings.System.AIRPLANE_MODE_ON, 0) != 0;
     }
 
     private void log(String msg) {

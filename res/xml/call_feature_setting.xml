@@ -70,5 +70,10 @@
         android:title="@string/labelCDMAMore"
         android:summary="@string/sum_cdma_call_settings"
         android:persistent="false" />
-
+    <!--UNISOC: modify for CDMA @{ -->
+    <Preference
+        android:key="button_cdma_cw_key"
+        android:title="@string/labelCW"
+        android:persistent="false" />
+    <!-- @} -->
 </PreferenceScreen>

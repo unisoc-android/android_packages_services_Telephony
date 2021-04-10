@@ -77,6 +77,10 @@ public class ADNList extends ListActivity {
 
     protected int mInitialSelection = -1;
 
+    /* UNISOC: function FDN support. @{ */
+    protected int mCursorCount = 0;
+    /* }@ */
+
     @Override
     protected void onCreate(Bundle icicle) {
         super.onCreate(icicle);
@@ -208,7 +212,12 @@ public class ADNList extends ListActivity {
         protected void onQueryComplete(int token, Object cookie, Cursor c) {
             if (DBG) log("onQueryComplete: cursor.count=" + c.getCount());
             mCursor = c;
-            setAdapter();
+            /* UNISOC: modify for function FDN support. @{ */
+            if (mCursor != null) {
+                mCursorCount = mCursor.getCount();
+                setAdapter();
+            }
+            /* }@ */
             displayProgress(false);
 
             // Cursor is refreshed and inherited classes may have menu items depending on it.
